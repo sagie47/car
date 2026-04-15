@@ -22,6 +22,41 @@ and refreshes stale units with new content.
 
 - Product requirements document: [docs/PRD-LotPilot.md](docs/PRD-LotPilot.md)
 
+## Current implementation
+
+The first implementation pass is a zero-dependency Node service that covers the
+core product wedge:
+
+- Dealer and rooftop creation.
+- Inventory ingest with idempotent vehicle upsert by rooftop plus VIN.
+- Eligibility evaluation and rooftop health scoring.
+- Listing draft generation and listing-state transitions.
+- Basic lead creation, assignment, and status tracking.
+- JSON API for local development.
+
+## Run locally
+
+```bash
+npm test
+npm start
+```
+
+The server starts on `http://localhost:3000`.
+
+## API surfaces
+
+- `POST /api/dealers`
+- `POST /api/rooftops`
+- `POST /api/ingest`
+- `GET /api/vehicles?rooftopId=...`
+- `GET /api/rooftops/:rooftopId/health`
+- `GET /api/rooftops/:rooftopId/stale-vehicles`
+- `GET /api/listings?rooftopId=...`
+- `POST /api/listings/:listingId/transitions`
+- `POST /api/leads`
+- `PATCH /api/leads/:leadId/assign`
+- `PATCH /api/leads/:leadId/status`
+
 ## MVP shape
 
 - Inventory ingestion from feeds, CSV, or website scrape fallback.
