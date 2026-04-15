@@ -1,0 +1,182 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Dealer {
+  id        String             @id
+  name      String
+  createdAt DateTime
+  rooftops  Rooftop[]
+  syncRuns  InventorySyncRun[]
+  vehicles  Vehicle[]
+}
+
+model Rooftop {
+  id             String             @id
+  dealerId       String
+  name           String
+  location       String?
+  phone          String?
+  logoUrl        String?
+  disclaimerText String?
+  assignmentMode String
+  rules          Json
+  createdAt      DateTime
+  dealer         Dealer             @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+  syncRuns       InventorySyncRun[]
+  vehicles       Vehicle[]
+  listings       Listing[]
+  leads          Lead[]
+
+  @@index([dealerId])
+}
+
+model InventorySyncRun {
+  id            String   @id
+  dealerId      String
+  rooftopId     String
+  sourceType    String
+  sourceName    String?
+  startedAt     DateTime
+  completedAt   DateTime?
+  rowsReceived  Int
+  rowsImported  Int
+  rowsSkipped   Int
+  duplicateVins Json
+  errors        Json
+  dealer        Dealer   @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+  rooftop       Rooftop  @relation(fields: [rooftopId], references: [id], onDelete: Cascade)
+  snapshots     VehicleSnapshot[]
+
+  @@index([rooftopId])
+  @@index([dealerId])
+}
+
+model Vehicle {
+  id                    String            @id
+  dealerId              String
+  rooftopId             String
+  vin                   String?
+  stockNumber           String?
+  year                  Int?
+  make                  String?
+  model                 String?
+  trim                  String?
+  condition             String?
+  mileage               Int?
+  price                 Int?
+  bodyStyle             String?
+  exteriorColor         String?
+  interiorColor         String?
+  photoUrls             Json
+  status                String?
+  vdpUrl                String?
+  salespersonAssignment String?
+  carfaxUrl             String?
+  optionsList           Json
+  drivetrain            String?
+  transmission          String?
+  fuelType              String?
+  engine                String?
+  daysInInventory       Int?
+  featured              Boolean
+  priceHistory          Json
+  rawSource             Json
+  naturalKey            String            @unique
+  sourceFingerprint     String
+  syncIssues            Json
+  isStale               Boolean
+  eligibility           Json
+  createdAt             DateTime
+  updatedAt             DateTime
+  dealer                Dealer            @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+  rooftop               Rooftop           @relation(fields: [rooftopId], references: [id], onDelete: Cascade)
+  snapshots             VehicleSnapshot[]
+  listing               Listing?
+  leads                 Lead[]
+
+  @@index([rooftopId])
+  @@index([dealerId])
+}
+
+model VehicleSnapshot {
+  id          String           @id
+  vehicleId   String
+  syncRunId   String
+  capturedAt  DateTime
+  fingerprint String
+  rawSource   Json
+  vehicle     Vehicle          @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  syncRun     InventorySyncRun @relation(fields: [syncRunId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, capturedAt])
+  @@index([syncRunId])
+}
+
+model Listing {
+  id        String         @id
+  vehicleId String         @unique
+  rooftopId String
+  state     String
+  draft     Json
+  createdAt DateTime
+  updatedAt DateTime
+  vehicle   Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  rooftop   Rooftop        @relation(fields: [rooftopId], references: [id], onDelete: Cascade)
+  events    ListingEvent[]
+
+  @@index([rooftopId])
+}
+
+model ListingEvent {
+  id        String   @id
+  listingId String
+  fromState String?
+  toState   String
+  actor     String
+  reason    String?
+  metadata  Json
+  createdAt DateTime
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, createdAt])
+}
+
+model Lead {
+  id                String      @id
+  vehicleId         String
+  rooftopId         String
+  sourceChannel     String
+  sourceSubchannel  String?
+  assignedRepId     String?
+  createdAt         DateTime
+  firstResponseAt   DateTime?
+  status            String
+  disposition       String?
+  appointmentSet    Boolean
+  sold              Boolean
+  attributedValue   Int?
+  suggestedResponse String
+  vehicle           Vehicle     @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  rooftop           Rooftop     @relation(fields: [rooftopId], references: [id], onDelete: Cascade)
+  events            LeadEvent[]
+
+  @@index([rooftopId])
+  @@index([status])
+}
+
+model LeadEvent {
+  id        String   @id
+  leadId    String
+  type      String
+  actor     String
+  metadata  Json
+  createdAt DateTime
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+}

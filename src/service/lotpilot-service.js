@@ -24,7 +24,7 @@ export class LotPilotService {
     this.store = store ?? new InMemoryStore();
   }
 
-  createDealer(payload) {
+  async createDealer(payload) {
     if (!payload?.name) {
       throw new Error('Dealer name is required');
     }
@@ -38,7 +38,7 @@ export class LotPilotService {
     return this.store.saveDealer(dealer);
   }
 
-  createRooftop(payload) {
+  async createRooftop(payload) {
     if (!payload?.dealerId) {
       throw new Error('dealerId is required');
     }
@@ -47,7 +47,7 @@ export class LotPilotService {
       throw new Error('Rooftop name is required');
     }
 
-    const dealer = this.store.getDealer(payload.dealerId);
+    const dealer = await this.store.getDealer(payload.dealerId);
     if (!dealer) {
       throw new Error(`Dealer ${payload.dealerId} was not found`);
     }
@@ -71,16 +71,12 @@ export class LotPilotService {
     return this.store.saveRooftop(rooftop);
   }
 
-  listVehicles({ rooftopId } = {}) {
-    if (!rooftopId) {
-      return [...this.store.vehicles.values()];
-    }
-
-    return this.store.listVehiclesByRooftop(rooftopId);
+  async listVehicles({ rooftopId } = {}) {
+    return this.store.listVehicles({ rooftopId });
   }
 
-  getVehicle(vehicleId) {
-    const vehicle = this.store.getVehicle(vehicleId);
+  async getVehicle(vehicleId) {
+    const vehicle = await this.store.getVehicle(vehicleId);
     if (!vehicle) {
       throw new Error(`Vehicle ${vehicleId} was not found`);
     }
@@ -88,16 +84,12 @@ export class LotPilotService {
     return vehicle;
   }
 
-  listListings({ rooftopId } = {}) {
-    if (!rooftopId) {
-      return [...this.store.listings.values()];
-    }
-
-    return this.store.listListingsByRooftop(rooftopId);
+  async listListings({ rooftopId } = {}) {
+    return this.store.listListings({ rooftopId });
   }
 
-  getListing(listingId) {
-    const listing = this.store.getListing(listingId);
+  async getListing(listingId) {
+    const listing = await this.store.getListing(listingId);
     if (!listing) {
       throw new Error(`Listing ${listingId} was not found`);
     }
@@ -105,32 +97,30 @@ export class LotPilotService {
     return listing;
   }
 
-  listLeads({ rooftopId, status } = {}) {
-    const leads = rooftopId ? this.store.listLeadsByRooftop(rooftopId) : [...this.store.leads.values()];
-    return status ? leads.filter((lead) => lead.status === status) : leads;
+  async listLeads({ rooftopId, status } = {}) {
+    return this.store.listLeads({ rooftopId, status });
   }
 
-  getRooftopHealth(rooftopId) {
-    const rooftop = this.store.getRooftop(rooftopId);
+  async getRooftopHealth(rooftopId) {
+    const rooftop = await this.store.getRooftop(rooftopId);
     if (!rooftop) {
       throw new Error(`Rooftop ${rooftopId} was not found`);
     }
 
-    return calculateInventoryHealth(this.store.listVehiclesByRooftop(rooftopId), rooftop.rules);
+    return calculateInventoryHealth(await this.store.listVehicles({ rooftopId }), rooftop.rules);
   }
 
-  listStaleVehicles(rooftopId) {
-    const rooftop = this.store.getRooftop(rooftopId);
+  async listStaleVehicles(rooftopId) {
+    const rooftop = await this.store.getRooftop(rooftopId);
     if (!rooftop) {
       throw new Error(`Rooftop ${rooftopId} was not found`);
     }
 
-    return this.store
-      .listVehiclesByRooftop(rooftopId)
+    return (await this.store.listVehicles({ rooftopId }))
       .filter((vehicle) => isVehicleStale(vehicle, rooftop.rules) && vehicle.eligibility.status !== 'blocked');
   }
 
-  ingestInventory(payload) {
+  async ingestInventory(payload) {
     if (!payload?.rooftopId) {
       throw new Error('rooftopId is required');
     }
@@ -139,7 +129,7 @@ export class LotPilotService {
       throw new Error('vehicles must be an array');
     }
 
-    const rooftop = this.store.getRooftop(payload.rooftopId);
+    const rooftop = await this.store.getRooftop(payload.rooftopId);
     if (!rooftop) {
       throw new Error(`Rooftop ${payload.rooftopId} was not found`);
     }
@@ -170,6 +160,8 @@ export class LotPilotService {
       queuedForRemoval: 0
     };
 
+    await this.store.saveSyncRun(syncRun);
+
     for (const rawVehicle of payload.vehicles) {
       const normalizedVehicle = normalizeIncomingVehicle(rawVehicle, {
         dealerId: rooftop.dealerId,
@@ -190,7 +182,7 @@ export class LotPilotService {
         seenVins.add(normalizedVehicle.vin);
       }
 
-      const existingVehicle = this.store.getVehicleByNaturalKey(normalizedVehicle.naturalKey);
+      const existingVehicle = await this.store.getVehicleByNaturalKey(normalizedVehicle.naturalKey);
       const fingerprint = stableHash(normalizedVehicle.rawSource);
       const vehicle = {
         ...(existingVehicle ?? {}),
@@ -221,10 +213,10 @@ export class LotPilotService {
         summary.createdVehicles += 1;
       }
 
-      this.store.saveVehicle(vehicle);
+      await this.store.saveVehicle(vehicle);
       syncRun.rowsImported += 1;
 
-      let listing = this.store.getListingByVehicleId(vehicle.id);
+      let listing = await this.store.getListingByVehicleId(vehicle.id);
 
       if (!listing && vehicle.eligibility.status !== 'blocked') {
         listing = createInitialListing(
@@ -235,7 +227,7 @@ export class LotPilotService {
           })
         );
         summary.createdListings += 1;
-        this.store.saveListing(listing);
+        await this.store.saveListing(listing);
         continue;
       }
 
@@ -263,23 +255,23 @@ export class LotPilotService {
         summary.queuedForRemoval += 1;
       }
 
-      this.store.saveListing(listing);
+      await this.store.saveListing(listing);
     }
 
     syncRun.completedAt = nowIso();
-    this.store.saveSyncRun(syncRun);
+    await this.store.saveSyncRun(syncRun);
 
     return {
       syncRun,
       summary,
-      health: calculateInventoryHealth(this.store.listVehiclesByRooftop(rooftop.id), rules)
+      health: calculateInventoryHealth(await this.store.listVehicles({ rooftopId: rooftop.id }), rules)
     };
   }
 
-  generateListingDraft(vehicleId, options = {}) {
-    const vehicle = this.getVehicle(vehicleId);
-    const rooftop = this.store.getRooftop(vehicle.rooftopId);
-    const listing = this.store.getListingByVehicleId(vehicle.id);
+  async generateListingDraft(vehicleId, options = {}) {
+    const vehicle = await this.getVehicle(vehicleId);
+    const rooftop = await this.store.getRooftop(vehicle.rooftopId);
+    const listing = await this.store.getListingByVehicleId(vehicle.id);
     const draft = buildListingDraft(vehicle, {
       ...options,
       rules: rooftop?.rules
@@ -287,7 +279,7 @@ export class LotPilotService {
 
     if (!listing) {
       const createdListing = createInitialListing(vehicle, draft);
-      this.store.saveListing(createdListing);
+      await this.store.saveListing(createdListing);
       return createdListing;
     }
 
@@ -297,47 +289,47 @@ export class LotPilotService {
       updatedAt: nowIso()
     };
 
-    this.store.saveListing(updatedListing);
+    await this.store.saveListing(updatedListing);
     return updatedListing;
   }
 
-  transitionListing(listingId, toState, metadata = {}) {
-    const listing = this.getListing(listingId);
+  async transitionListing(listingId, toState, metadata = {}) {
+    const listing = await this.getListing(listingId);
     const updatedListing = transitionListingState(listing, toState, metadata);
-    this.store.saveListing(updatedListing);
+    await this.store.saveListing(updatedListing);
     return updatedListing;
   }
 
-  createLead(payload) {
+  async createLead(payload) {
     if (!payload?.rooftopId || !payload?.vehicleId || !payload?.sourceChannel) {
       throw new Error('rooftopId, vehicleId, and sourceChannel are required');
     }
 
-    const vehicle = this.getVehicle(payload.vehicleId);
+    const vehicle = await this.getVehicle(payload.vehicleId);
     const lead = createLeadRecord(payload, vehicle);
-    this.store.saveLead(lead);
+    await this.store.saveLead(lead);
     return lead;
   }
 
-  assignLead(leadId, assignedRepId, actor = 'system') {
-    const lead = this.store.getLead(leadId);
+  async assignLead(leadId, assignedRepId, actor = 'system') {
+    const lead = await this.store.getLead(leadId);
     if (!lead) {
       throw new Error(`Lead ${leadId} was not found`);
     }
 
     const updatedLead = assignLeadRecord(lead, assignedRepId, actor);
-    this.store.saveLead(updatedLead);
+    await this.store.saveLead(updatedLead);
     return updatedLead;
   }
 
-  updateLeadStatus(leadId, status, metadata = {}) {
-    const lead = this.store.getLead(leadId);
+  async updateLeadStatus(leadId, status, metadata = {}) {
+    const lead = await this.store.getLead(leadId);
     if (!lead) {
       throw new Error(`Lead ${leadId} was not found`);
     }
 
     const updatedLead = updateLeadStatusRecord(lead, status, metadata);
-    this.store.saveLead(updatedLead);
+    await this.store.saveLead(updatedLead);
     return updatedLead;
   }
 }

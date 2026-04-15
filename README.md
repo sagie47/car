@@ -24,24 +24,43 @@ and refreshes stale units with new content.
 
 ## Current implementation
 
-The first implementation pass is a zero-dependency Node service that covers the
-core product wedge:
+The current implementation is a Prisma-backed Node service that covers the core
+product wedge:
 
 - Dealer and rooftop creation.
-- Inventory ingest with idempotent vehicle upsert by rooftop plus VIN.
+- Inventory ingest with durable vehicle upsert by rooftop plus VIN.
 - Eligibility evaluation and rooftop health scoring.
 - Listing draft generation and listing-state transitions.
 - Basic lead creation, assignment, and status tracking.
 - JSON API for local development.
+- Postgres persistence for dealers, rooftops, sync runs, vehicles, snapshots,
+  listings, listing events, leads, and lead events.
 
-## Run locally
+## Local setup
 
 ```bash
+npm run db:up
+npm run prisma:migrate
 npm test
+npm run test:integration
 npm start
 ```
 
 The server starts on `http://localhost:3000`.
+
+Copy [.env.example](.env.example) to `.env` if you want explicit connection
+configuration. The checked-in defaults target local Postgres at `127.0.0.1`.
+
+If Docker is available and running, `npm run db:up` starts Postgres via
+Compose. If you already have a local PostgreSQL service, create a database
+named `lotpilot` and use the same connection URLs from `.env.example`.
+
+## Test layers
+
+- `npm test`: unit tests against the in-memory store.
+- `npm run prisma:push:test`: syncs the Prisma test schema.
+- `npm run test:integration`: Prisma-backed integration tests plus HTTP smoke.
+- `npm run test:all`: unit plus integration coverage.
 
 ## API surfaces
 
@@ -56,6 +75,14 @@ The server starts on `http://localhost:3000`.
 - `POST /api/leads`
 - `PATCH /api/leads/:leadId/assign`
 - `PATCH /api/leads/:leadId/status`
+
+## Persistence notes
+
+- Runtime storage uses Prisma with PostgreSQL.
+- The main schema uses the `public` schema in the `lotpilot` database.
+- Integration tests use the `test` schema in the same database.
+- Vehicle snapshots, listing events, and lead events are stored as append-only
+  records.
 
 ## MVP shape
 
