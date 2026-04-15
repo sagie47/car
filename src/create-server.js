@@ -72,6 +72,18 @@ export function createHttpServer({ service = createDefaultService() } = {}) {
         return sendJson(response, 201, await service.createRooftop(await readJson(request)));
       }
 
+      if (request.method === 'POST' && pathname === '/api/inventory-sources') {
+        return sendJson(response, 201, await service.createInventorySource(await readJson(request)));
+      }
+
+      if (request.method === 'GET' && pathname === '/api/inventory-sources') {
+        return sendJson(
+          response,
+          200,
+          await service.listInventorySources({ rooftopId: searchParams.get('rooftopId') })
+        );
+      }
+
       if (request.method === 'POST' && pathname === '/api/ingest') {
         return sendJson(response, 200, await service.ingestInventory(await readJson(request)));
       }
@@ -138,8 +150,35 @@ export function createHttpServer({ service = createDefaultService() } = {}) {
         );
       }
 
+      if (request.method === 'GET' && pathname === '/api/sync-runs') {
+        return sendJson(
+          response,
+          200,
+          await service.listSyncRuns({
+            rooftopId: searchParams.get('rooftopId'),
+            inventorySourceId: searchParams.get('inventorySourceId'),
+            status: searchParams.get('status')
+          })
+        );
+      }
+
       if (request.method === 'POST' && pathname === '/api/leads') {
         return sendJson(response, 201, await service.createLead(await readJson(request)));
+      }
+
+      const inventorySourceMatch = matchPath(pathname, '/api/inventory-sources/:inventorySourceId');
+      if (request.method === 'GET' && inventorySourceMatch) {
+        return sendJson(response, 200, await service.getInventorySource(inventorySourceMatch.inventorySourceId));
+      }
+
+      const inventorySourceSyncMatch = matchPath(pathname, '/api/inventory-sources/:inventorySourceId/sync');
+      if (request.method === 'POST' && inventorySourceSyncMatch) {
+        return sendJson(response, 200, await service.syncInventorySource(inventorySourceSyncMatch.inventorySourceId));
+      }
+
+      const syncRunMatch = matchPath(pathname, '/api/sync-runs/:syncRunId');
+      if (request.method === 'GET' && syncRunMatch) {
+        return sendJson(response, 200, await service.getSyncRun(syncRunMatch.syncRunId));
       }
 
       const leadAssignMatch = matchPath(pathname, '/api/leads/:leadId/assign');
@@ -163,7 +202,8 @@ export function createHttpServer({ service = createDefaultService() } = {}) {
       });
     } catch (error) {
       return sendJson(response, 400, {
-        error: error.message
+        error: error.message,
+        syncRunId: error.syncRunId ?? null
       });
     }
   }

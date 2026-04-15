@@ -18,6 +18,7 @@ export async function resetDatabase(client) {
       "Listing",
       "VehicleSnapshot",
       "InventorySyncRun",
+      "InventorySource",
       "Vehicle",
       "Rooftop",
       "Dealer"
@@ -43,6 +44,16 @@ export async function seedDealerContext(service) {
   });
 
   return { dealer, rooftop };
+}
+
+export async function seedInventorySource(service, rooftop, sourceUrl) {
+  return service.createInventorySource({
+    rooftopId: rooftop.id,
+    name: 'Primary XML Feed',
+    type: 'xml_feed_url',
+    format: 'generic_xml_v1',
+    sourceUrl
+  });
 }
 
 export function buildVehicle(overrides = {}) {

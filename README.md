@@ -29,6 +29,7 @@ product wedge:
 
 - Dealer and rooftop creation.
 - Inventory ingest with durable vehicle upsert by rooftop plus VIN.
+- Inventory source persistence and manual XML feed URL sync.
 - Eligibility evaluation and rooftop health scoring.
 - Listing draft generation and listing-state transitions.
 - Basic lead creation, assignment, and status tracking.
@@ -41,6 +42,7 @@ product wedge:
 ```bash
 npm run db:up
 npm run prisma:migrate
+npm run prisma:generate
 npm test
 npm run test:integration
 npm start
@@ -66,7 +68,13 @@ named `lotpilot` and use the same connection URLs from `.env.example`.
 
 - `POST /api/dealers`
 - `POST /api/rooftops`
+- `POST /api/inventory-sources`
+- `GET /api/inventory-sources?rooftopId=...`
+- `GET /api/inventory-sources/:inventorySourceId`
+- `POST /api/inventory-sources/:inventorySourceId/sync`
 - `POST /api/ingest`
+- `GET /api/sync-runs?rooftopId=...&inventorySourceId=...`
+- `GET /api/sync-runs/:syncRunId`
 - `GET /api/vehicles?rooftopId=...`
 - `GET /api/rooftops/:rooftopId/health`
 - `GET /api/rooftops/:rooftopId/stale-vehicles`
@@ -81,8 +89,16 @@ named `lotpilot` and use the same connection URLs from `.env.example`.
 - Runtime storage uses Prisma with PostgreSQL.
 - The main schema uses the `public` schema in the `lotpilot` database.
 - Integration tests use the `test` schema in the same database.
+- Inventory sources and sync runs are persisted alongside vehicles and leads.
 - Vehicle snapshots, listing events, and lead events are stored as append-only
   records.
+
+## Feed notes
+
+- The first real adapter is `xml_feed_url` with `generic_xml_v1`.
+- Manual `sync now` is supported through the API.
+- Recurring polling, CSV URL ingest, and website scrape fallback are not
+  implemented yet.
 
 ## MVP shape
 

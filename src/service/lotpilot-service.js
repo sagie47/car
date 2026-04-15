@@ -1,4 +1,11 @@
-import { createId, nowIso, stableHash } from '../lib/utils.js';
+import { fetchXmlFeed, parseGenericXmlFeed } from '../adapters/generic-xml-feed.js';
+import {
+  buildSyncRunRecord,
+  createInventorySourceRecord,
+  INVENTORY_SOURCE_FORMATS,
+  INVENTORY_SOURCE_TYPES,
+  validateInventorySourcePayload
+} from '../domain/inventory-source.js';
 import { evaluateVehicleEligibility, isVehicleStale } from '../domain/eligibility.js';
 import { calculateInventoryHealth } from '../domain/health-score.js';
 import { buildListingDraft } from '../domain/listing-draft.js';
@@ -9,6 +16,7 @@ import {
 } from '../domain/listing-state-machine.js';
 import { assignLeadRecord, createLeadRecord, updateLeadStatusRecord } from '../domain/lead.js';
 import { normalizeIncomingVehicle } from '../domain/vehicle.js';
+import { createId, nowIso, stableHash } from '../lib/utils.js';
 import { InMemoryStore } from '../store/in-memory-store.js';
 
 function defaultRules() {
@@ -19,9 +27,17 @@ function defaultRules() {
   };
 }
 
+function defaultFeedAdapter() {
+  return {
+    fetchXmlFeed,
+    parseGenericXmlFeed
+  };
+}
+
 export class LotPilotService {
-  constructor({ store } = {}) {
+  constructor({ store, feedAdapter } = {}) {
     this.store = store ?? new InMemoryStore();
+    this.feedAdapter = feedAdapter ?? defaultFeedAdapter();
   }
 
   async createDealer(payload) {
@@ -71,6 +87,31 @@ export class LotPilotService {
     return this.store.saveRooftop(rooftop);
   }
 
+  async createInventorySource(payload) {
+    validateInventorySourcePayload(payload);
+
+    const rooftop = await this.store.getRooftop(payload.rooftopId);
+    if (!rooftop) {
+      throw new Error(`Rooftop ${payload.rooftopId} was not found`);
+    }
+
+    const inventorySource = createInventorySourceRecord(payload);
+    return this.store.saveInventorySource(inventorySource);
+  }
+
+  async listInventorySources({ rooftopId } = {}) {
+    return this.store.listInventorySources({ rooftopId });
+  }
+
+  async getInventorySource(inventorySourceId) {
+    const inventorySource = await this.store.getInventorySource(inventorySourceId);
+    if (!inventorySource) {
+      throw new Error(`Inventory source ${inventorySourceId} was not found`);
+    }
+
+    return inventorySource;
+  }
+
   async listVehicles({ rooftopId } = {}) {
     return this.store.listVehicles({ rooftopId });
   }
@@ -101,6 +142,19 @@ export class LotPilotService {
     return this.store.listLeads({ rooftopId, status });
   }
 
+  async getSyncRun(syncRunId) {
+    const syncRun = await this.store.getSyncRun(syncRunId);
+    if (!syncRun) {
+      throw new Error(`Sync run ${syncRunId} was not found`);
+    }
+
+    return syncRun;
+  }
+
+  async listSyncRuns({ rooftopId, inventorySourceId, status } = {}) {
+    return this.store.listSyncRuns({ rooftopId, inventorySourceId, status });
+  }
+
   async getRooftopHealth(rooftopId) {
     const rooftop = await this.store.getRooftop(rooftopId);
     if (!rooftop) {
@@ -116,42 +170,34 @@ export class LotPilotService {
       throw new Error(`Rooftop ${rooftopId} was not found`);
     }
 
-    return (await this.store.listVehicles({ rooftopId }))
-      .filter((vehicle) => isVehicleStale(vehicle, rooftop.rules) && vehicle.eligibility.status !== 'blocked');
+    return (await this.store.listVehicles({ rooftopId })).filter(
+      (vehicle) => isVehicleStale(vehicle, rooftop.rules) && vehicle.eligibility.status !== 'blocked'
+    );
   }
 
-  async ingestInventory(payload) {
-    if (!payload?.rooftopId) {
-      throw new Error('rooftopId is required');
-    }
-
-    if (!Array.isArray(payload?.vehicles)) {
-      throw new Error('vehicles must be an array');
-    }
-
-    const rooftop = await this.store.getRooftop(payload.rooftopId);
-    if (!rooftop) {
-      throw new Error(`Rooftop ${payload.rooftopId} was not found`);
-    }
-
-    const rules = {
-      ...rooftop.rules,
-      ...(payload.rules ?? {})
+  async failSyncRun(syncRun, error) {
+    const failedSyncRun = {
+      ...syncRun,
+      status: 'failed',
+      completedAt: nowIso(),
+      errors: [
+        ...(syncRun.errors ?? []),
+        {
+          type: 'sync_failure',
+          reason: error.message
+        }
+      ]
     };
-    const syncRun = {
-      id: createId('sync'),
-      dealerId: rooftop.dealerId,
-      rooftopId: rooftop.id,
-      sourceType: payload.sourceType ?? 'manual',
-      sourceName: payload.sourceName ?? null,
-      startedAt: nowIso(),
-      completedAt: null,
-      rowsReceived: payload.vehicles.length,
-      rowsImported: 0,
-      rowsSkipped: 0,
-      duplicateVins: [],
-      errors: []
-    };
+
+    await this.store.saveSyncRun(failedSyncRun);
+    return failedSyncRun;
+  }
+
+  async ingestVehicleRows({ rooftop, rules, vehicles, syncRun, tonePreset }) {
+    const activeSyncRun = syncRun;
+    activeSyncRun.rowsReceived = vehicles.length;
+    await this.store.saveSyncRun(activeSyncRun);
+
     const seenVins = new Set();
     const summary = {
       createdVehicles: 0,
@@ -160,9 +206,7 @@ export class LotPilotService {
       queuedForRemoval: 0
     };
 
-    await this.store.saveSyncRun(syncRun);
-
-    for (const rawVehicle of payload.vehicles) {
+    for (const rawVehicle of vehicles) {
       const normalizedVehicle = normalizeIncomingVehicle(rawVehicle, {
         dealerId: rooftop.dealerId,
         rooftopId: rooftop.id
@@ -170,9 +214,9 @@ export class LotPilotService {
 
       if (normalizedVehicle.vin) {
         if (seenVins.has(normalizedVehicle.vin)) {
-          syncRun.rowsSkipped += 1;
-          syncRun.duplicateVins.push(normalizedVehicle.vin);
-          syncRun.errors.push({
+          activeSyncRun.rowsSkipped += 1;
+          activeSyncRun.duplicateVins.push(normalizedVehicle.vin);
+          activeSyncRun.errors.push({
             vin: normalizedVehicle.vin,
             reason: 'Duplicate VIN in the same import batch'
           });
@@ -196,7 +240,7 @@ export class LotPilotService {
           ...(existingVehicle?.snapshots ?? []),
           {
             id: createId('snapshot'),
-            syncRunId: syncRun.id,
+            syncRunId: activeSyncRun.id,
             capturedAt: nowIso(),
             fingerprint,
             rawSource: normalizedVehicle.rawSource
@@ -214,7 +258,7 @@ export class LotPilotService {
       }
 
       await this.store.saveVehicle(vehicle);
-      syncRun.rowsImported += 1;
+      activeSyncRun.rowsImported += 1;
 
       let listing = await this.store.getListingByVehicleId(vehicle.id);
 
@@ -222,7 +266,7 @@ export class LotPilotService {
         listing = createInitialListing(
           vehicle,
           buildListingDraft(vehicle, {
-            tonePreset: payload.tonePreset,
+            tonePreset,
             rules
           })
         );
@@ -238,7 +282,7 @@ export class LotPilotService {
       listing = {
         ...listing,
         draft: buildListingDraft(vehicle, {
-          tonePreset: listing.draft?.tonePreset ?? payload.tonePreset,
+          tonePreset: listing.draft?.tonePreset ?? tonePreset,
           rules
         }),
         updatedAt: nowIso()
@@ -258,14 +302,142 @@ export class LotPilotService {
       await this.store.saveListing(listing);
     }
 
-    syncRun.completedAt = nowIso();
-    await this.store.saveSyncRun(syncRun);
-
     return {
-      syncRun,
+      syncRun: activeSyncRun,
       summary,
       health: calculateInventoryHealth(await this.store.listVehicles({ rooftopId: rooftop.id }), rules)
     };
+  }
+
+  async ingestInventory(payload) {
+    if (!payload?.rooftopId) {
+      throw new Error('rooftopId is required');
+    }
+
+    if (!Array.isArray(payload?.vehicles)) {
+      throw new Error('vehicles must be an array');
+    }
+
+    const rooftop = await this.store.getRooftop(payload.rooftopId);
+    if (!rooftop) {
+      throw new Error(`Rooftop ${payload.rooftopId} was not found`);
+    }
+
+    const rules = {
+      ...rooftop.rules,
+      ...(payload.rules ?? {})
+    };
+
+    let syncRun = buildSyncRunRecord({
+      rooftop,
+      inventorySourceId: payload.inventorySourceId ?? null,
+      sourceType: payload.sourceType ?? 'manual',
+      sourceName: payload.sourceName ?? null,
+      trigger: payload.trigger ?? 'manual'
+    });
+
+    await this.store.saveSyncRun(syncRun);
+
+    try {
+      const result = await this.ingestVehicleRows({
+        rooftop,
+        rules,
+        vehicles: payload.vehicles,
+        syncRun,
+        tonePreset: payload.tonePreset
+      });
+
+      syncRun = {
+        ...result.syncRun,
+        status: 'completed',
+        completedAt: nowIso()
+      };
+      await this.store.saveSyncRun(syncRun);
+
+      return {
+        syncRun,
+        summary: result.summary,
+        health: result.health
+      };
+    } catch (error) {
+      syncRun = await this.failSyncRun(syncRun, error);
+      error.syncRunId = syncRun.id;
+      throw error;
+    }
+  }
+
+  async syncInventorySource(inventorySourceId) {
+    const inventorySource = await this.getInventorySource(inventorySourceId);
+    const rooftop = await this.store.getRooftop(inventorySource.rooftopId);
+    if (!rooftop) {
+      throw new Error(`Rooftop ${inventorySource.rooftopId} was not found`);
+    }
+
+    if (inventorySource.type !== INVENTORY_SOURCE_TYPES.XML_FEED_URL) {
+      throw new Error(`Unsupported inventory source type '${inventorySource.type}'`);
+    }
+
+    if (inventorySource.format !== INVENTORY_SOURCE_FORMATS.GENERIC_XML_V1) {
+      throw new Error(`Unsupported inventory source format '${inventorySource.format}'`);
+    }
+
+    let syncRun = buildSyncRunRecord({
+      rooftop,
+      inventorySourceId: inventorySource.id,
+      sourceType: inventorySource.type,
+      sourceName: inventorySource.name,
+      trigger: 'manual'
+    });
+
+    await this.store.saveSyncRun(syncRun);
+
+    try {
+      const xml = await this.feedAdapter.fetchXmlFeed(inventorySource.sourceUrl);
+      const vehicles = this.feedAdapter.parseGenericXmlFeed(xml);
+
+      if (!vehicles.length) {
+        throw new Error('Feed XML does not contain any usable vehicle records');
+      }
+
+      const result = await this.ingestVehicleRows({
+        rooftop,
+        rules: rooftop.rules,
+        vehicles,
+        syncRun,
+        tonePreset: null
+      });
+
+      syncRun = {
+        ...result.syncRun,
+        status: 'completed',
+        completedAt: nowIso()
+      };
+      await this.store.saveSyncRun(syncRun);
+
+      const updatedInventorySource = await this.store.saveInventorySource({
+        ...inventorySource,
+        lastSyncedAt: syncRun.completedAt,
+        lastSyncStatus: 'completed',
+        updatedAt: nowIso()
+      });
+
+      return {
+        inventorySource: updatedInventorySource,
+        syncRun,
+        summary: result.summary,
+        health: result.health
+      };
+    } catch (error) {
+      syncRun = await this.failSyncRun(syncRun, error);
+      await this.store.saveInventorySource({
+        ...inventorySource,
+        lastSyncedAt: syncRun.completedAt,
+        lastSyncStatus: 'failed',
+        updatedAt: nowIso()
+      });
+      error.syncRunId = syncRun.id;
+      throw error;
+    }
   }
 
   async generateListingDraft(vehicleId, options = {}) {

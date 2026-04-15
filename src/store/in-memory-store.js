@@ -5,6 +5,7 @@ export class InMemoryStore extends LotPilotStore {
     super();
     this.dealers = new Map();
     this.rooftops = new Map();
+    this.inventorySources = new Map();
     this.syncRuns = new Map();
     this.vehicles = new Map();
     this.vehicleKeys = new Map();
@@ -31,9 +32,46 @@ export class InMemoryStore extends LotPilotStore {
     return this.rooftops.get(rooftopId) ?? null;
   }
 
+  async saveInventorySource(inventorySource) {
+    this.inventorySources.set(inventorySource.id, inventorySource);
+    return inventorySource;
+  }
+
+  async getInventorySource(inventorySourceId) {
+    return this.inventorySources.get(inventorySourceId) ?? null;
+  }
+
+  async listInventorySources({ rooftopId } = {}) {
+    const sources = [...this.inventorySources.values()];
+    return rooftopId ? sources.filter((source) => source.rooftopId === rooftopId) : sources;
+  }
+
   async saveSyncRun(syncRun) {
     this.syncRuns.set(syncRun.id, syncRun);
     return syncRun;
+  }
+
+  async getSyncRun(syncRunId) {
+    return this.syncRuns.get(syncRunId) ?? null;
+  }
+
+  async listSyncRuns({ rooftopId, inventorySourceId, status } = {}) {
+    const syncRuns = [...this.syncRuns.values()];
+    return syncRuns.filter((syncRun) => {
+      if (rooftopId && syncRun.rooftopId !== rooftopId) {
+        return false;
+      }
+
+      if (inventorySourceId && syncRun.inventorySourceId !== inventorySourceId) {
+        return false;
+      }
+
+      if (status && syncRun.status !== status) {
+        return false;
+      }
+
+      return true;
+    });
   }
 
   async getVehicleByNaturalKey(naturalKey) {

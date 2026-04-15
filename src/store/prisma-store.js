@@ -35,14 +35,35 @@ function mapRooftop(record) {
     : null;
 }
 
+function mapInventorySource(record) {
+  return record
+    ? {
+        id: record.id,
+        rooftopId: record.rooftopId,
+        name: record.name,
+        type: record.type,
+        format: record.format,
+        sourceUrl: record.sourceUrl,
+        isActive: record.isActive,
+        lastSyncedAt: record.lastSyncedAt?.toISOString() ?? null,
+        lastSyncStatus: record.lastSyncStatus ?? null,
+        createdAt: record.createdAt.toISOString(),
+        updatedAt: record.updatedAt.toISOString()
+      }
+    : null;
+}
+
 function mapSyncRun(record) {
   return record
     ? {
         id: record.id,
         dealerId: record.dealerId,
         rooftopId: record.rooftopId,
+        inventorySourceId: record.inventorySourceId ?? null,
         sourceType: record.sourceType,
         sourceName: record.sourceName,
+        status: record.status,
+        trigger: record.trigger,
         startedAt: record.startedAt.toISOString(),
         completedAt: record.completedAt?.toISOString() ?? null,
         rowsReceived: record.rowsReceived,
@@ -223,14 +244,63 @@ export class PrismaStore extends LotPilotStore {
     return mapRooftop(await this.client.rooftop.findUnique({ where: { id: rooftopId } }));
   }
 
+  async saveInventorySource(inventorySource) {
+    const record = await this.client.inventorySource.upsert({
+      where: { id: inventorySource.id },
+      update: {
+        rooftopId: inventorySource.rooftopId,
+        name: inventorySource.name,
+        type: inventorySource.type,
+        format: inventorySource.format,
+        sourceUrl: inventorySource.sourceUrl,
+        isActive: Boolean(inventorySource.isActive),
+        lastSyncedAt: inventorySource.lastSyncedAt ? new Date(inventorySource.lastSyncedAt) : null,
+        lastSyncStatus: toNullable(inventorySource.lastSyncStatus),
+        createdAt: new Date(inventorySource.createdAt),
+        updatedAt: new Date(inventorySource.updatedAt)
+      },
+      create: {
+        id: inventorySource.id,
+        rooftopId: inventorySource.rooftopId,
+        name: inventorySource.name,
+        type: inventorySource.type,
+        format: inventorySource.format,
+        sourceUrl: inventorySource.sourceUrl,
+        isActive: Boolean(inventorySource.isActive),
+        lastSyncedAt: inventorySource.lastSyncedAt ? new Date(inventorySource.lastSyncedAt) : null,
+        lastSyncStatus: toNullable(inventorySource.lastSyncStatus),
+        createdAt: new Date(inventorySource.createdAt),
+        updatedAt: new Date(inventorySource.updatedAt)
+      }
+    });
+
+    return mapInventorySource(record);
+  }
+
+  async getInventorySource(inventorySourceId) {
+    return mapInventorySource(await this.client.inventorySource.findUnique({ where: { id: inventorySourceId } }));
+  }
+
+  async listInventorySources({ rooftopId } = {}) {
+    const records = await this.client.inventorySource.findMany({
+      where: rooftopId ? { rooftopId } : undefined,
+      orderBy: { createdAt: 'asc' }
+    });
+
+    return records.map(mapInventorySource);
+  }
+
   async saveSyncRun(syncRun) {
     const record = await this.client.inventorySyncRun.upsert({
       where: { id: syncRun.id },
       update: {
         dealerId: syncRun.dealerId,
         rooftopId: syncRun.rooftopId,
+        inventorySourceId: toNullable(syncRun.inventorySourceId),
         sourceType: syncRun.sourceType,
         sourceName: toNullable(syncRun.sourceName),
+        status: syncRun.status,
+        trigger: syncRun.trigger,
         startedAt: new Date(syncRun.startedAt),
         completedAt: syncRun.completedAt ? new Date(syncRun.completedAt) : null,
         rowsReceived: syncRun.rowsReceived,
@@ -243,8 +313,11 @@ export class PrismaStore extends LotPilotStore {
         id: syncRun.id,
         dealerId: syncRun.dealerId,
         rooftopId: syncRun.rooftopId,
+        inventorySourceId: toNullable(syncRun.inventorySourceId),
         sourceType: syncRun.sourceType,
         sourceName: toNullable(syncRun.sourceName),
+        status: syncRun.status,
+        trigger: syncRun.trigger,
         startedAt: new Date(syncRun.startedAt),
         completedAt: syncRun.completedAt ? new Date(syncRun.completedAt) : null,
         rowsReceived: syncRun.rowsReceived,
@@ -256,6 +329,24 @@ export class PrismaStore extends LotPilotStore {
     });
 
     return mapSyncRun(record);
+  }
+
+  async getSyncRun(syncRunId) {
+    return mapSyncRun(await this.client.inventorySyncRun.findUnique({ where: { id: syncRunId } }));
+  }
+
+  async listSyncRuns({ rooftopId, inventorySourceId, status } = {}) {
+    const where = {
+      ...(rooftopId ? { rooftopId } : {}),
+      ...(inventorySourceId ? { inventorySourceId } : {}),
+      ...(status ? { status } : {})
+    };
+    const records = await this.client.inventorySyncRun.findMany({
+      where,
+      orderBy: { startedAt: 'desc' }
+    });
+
+    return records.map(mapSyncRun);
   }
 
   async getVehicleByNaturalKey(naturalKey) {

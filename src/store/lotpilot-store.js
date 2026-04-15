@@ -15,7 +15,27 @@ export class LotPilotStore {
     throw new Error('Not implemented');
   }
 
+  async saveInventorySource() {
+    throw new Error('Not implemented');
+  }
+
+  async getInventorySource() {
+    throw new Error('Not implemented');
+  }
+
+  async listInventorySources() {
+    throw new Error('Not implemented');
+  }
+
   async saveSyncRun() {
+    throw new Error('Not implemented');
+  }
+
+  async getSyncRun() {
+    throw new Error('Not implemented');
+  }
+
+  async listSyncRuns() {
     throw new Error('Not implemented');
   }
 

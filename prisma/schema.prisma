@@ -27,6 +27,7 @@ model Rooftop {
   rules          Json
   createdAt      DateTime
   dealer         Dealer             @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+  inventorySources InventorySource[]
   syncRuns       InventorySyncRun[]
   vehicles       Vehicle[]
   listings       Listing[]
@@ -35,12 +36,33 @@ model Rooftop {
   @@index([dealerId])
 }
 
+model InventorySource {
+  id             String             @id
+  rooftopId      String
+  name           String
+  type           String
+  format         String
+  sourceUrl      String
+  isActive       Boolean
+  lastSyncedAt   DateTime?
+  lastSyncStatus String?
+  createdAt      DateTime
+  updatedAt      DateTime
+  rooftop        Rooftop            @relation(fields: [rooftopId], references: [id], onDelete: Cascade)
+  syncRuns       InventorySyncRun[]
+
+  @@index([rooftopId])
+}
+
 model InventorySyncRun {
   id            String   @id
   dealerId      String
   rooftopId     String
+  inventorySourceId String?
   sourceType    String
   sourceName    String?
+  status        String   @default("completed")
+  trigger       String   @default("manual")
   startedAt     DateTime
   completedAt   DateTime?
   rowsReceived  Int
@@ -49,9 +71,11 @@ model InventorySyncRun {
   duplicateVins Json
   errors        Json
   dealer        Dealer   @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+  inventorySource InventorySource? @relation(fields: [inventorySourceId], references: [id], onDelete: SetNull)
   rooftop       Rooftop  @relation(fields: [rooftopId], references: [id], onDelete: Cascade)
   snapshots     VehicleSnapshot[]
 
+  @@index([inventorySourceId])
   @@index([rooftopId])
   @@index([dealerId])
 }

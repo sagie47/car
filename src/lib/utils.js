@@ -17,7 +17,16 @@ export function toNumber(value) {
     return null;
   }
 
-  const parsed = Number(value);
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const normalized = String(value).replace(/[^0-9.-]/g, '');
+  if (!normalized) {
+    return null;
+  }
+
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -54,6 +63,23 @@ export function pickFirst(...values) {
   }
 
   return null;
+}
+
+export function arrayify(value) {
+  if (value === null || value === undefined) {
+    return [];
+  }
+
+  return Array.isArray(value) ? value : [value];
+}
+
+export function isHttpUrl(value) {
+  try {
+    const url = new URL(String(value));
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 export function formatCurrency(value) {
