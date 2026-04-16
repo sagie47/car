@@ -7,6 +7,9 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
+    "app:dev": "npm --prefix apps/dealer-app run dev",
+    "app:build": "npm --prefix apps/dealer-app run build",
+    "app:start": "npm --prefix apps/dealer-app run start",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
     "prisma:generate": "prisma generate",

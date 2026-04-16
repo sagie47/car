@@ -30,6 +30,8 @@ product wedge:
 - Dealer and rooftop creation.
 - Inventory ingest with durable vehicle upsert by rooftop plus VIN.
 - Inventory source persistence and manual XML feed URL sync.
+- Separate Next.js dealer app for setup, health, vehicles, listings, leads,
+  reports, settings, stale-unit review, and assignment management.
 - Eligibility evaluation and rooftop health scoring.
 - Listing draft generation and listing-state transitions.
 - Basic lead creation, assignment, and status tracking.
@@ -46,9 +48,11 @@ npm run prisma:generate
 npm test
 npm run test:integration
 npm start
+npm run app:dev
 ```
 
-The server starts on `http://localhost:3000`.
+The backend server starts on `http://localhost:3000`.
+The dealer app starts on `http://localhost:3001`.
 
 Copy [.env.example](.env.example) to `.env` if you want explicit connection
 configuration. The checked-in defaults target local Postgres at `127.0.0.1`.
@@ -67,7 +71,12 @@ named `lotpilot` and use the same connection URLs from `.env.example`.
 ## API surfaces
 
 - `POST /api/dealers`
+- `GET /api/dealers`
+- `GET /api/dealers/:dealerId`
 - `POST /api/rooftops`
+- `GET /api/rooftops?dealerId=...`
+- `GET /api/rooftops/:rooftopId`
+- `GET /api/rooftops/:rooftopId/dashboard`
 - `POST /api/inventory-sources`
 - `GET /api/inventory-sources?rooftopId=...`
 - `GET /api/inventory-sources/:inventorySourceId`
@@ -81,8 +90,21 @@ named `lotpilot` and use the same connection URLs from `.env.example`.
 - `GET /api/listings?rooftopId=...`
 - `POST /api/listings/:listingId/transitions`
 - `POST /api/leads`
+- `GET /api/leads/:leadId`
 - `PATCH /api/leads/:leadId/assign`
 - `PATCH /api/leads/:leadId/status`
+
+## Dealer app surfaces
+
+- `/` overview with setup branching and current rooftop summary
+- `/setup` setup wizard
+- `/vehicles` and `/vehicles/:vehicleId`
+- `/listings` and `/listings/:listingId`
+- `/stale`
+- `/leads` and `/leads/:leadId`
+- `/reports`
+- `/settings`
+- `/assignments`
 
 ## Persistence notes
 

@@ -3,11 +3,19 @@ export class LotPilotStore {
     throw new Error('Not implemented');
   }
 
+  async listDealers() {
+    throw new Error('Not implemented');
+  }
+
   async getDealer() {
     throw new Error('Not implemented');
   }
 
   async saveRooftop() {
+    throw new Error('Not implemented');
+  }
+
+  async listRooftops() {
     throw new Error('Not implemented');
   }
 

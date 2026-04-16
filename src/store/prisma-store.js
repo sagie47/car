@@ -205,6 +205,14 @@ export class PrismaStore extends LotPilotStore {
     return mapDealer(record);
   }
 
+  async listDealers() {
+    const records = await this.client.dealer.findMany({
+      orderBy: { createdAt: 'asc' }
+    });
+
+    return records.map(mapDealer);
+  }
+
   async getDealer(dealerId) {
     return mapDealer(await this.client.dealer.findUnique({ where: { id: dealerId } }));
   }
@@ -238,6 +246,15 @@ export class PrismaStore extends LotPilotStore {
     });
 
     return mapRooftop(record);
+  }
+
+  async listRooftops({ dealerId } = {}) {
+    const records = await this.client.rooftop.findMany({
+      where: dealerId ? { dealerId } : undefined,
+      orderBy: { createdAt: 'asc' }
+    });
+
+    return records.map(mapRooftop);
   }
 
   async getRooftop(rooftopId) {

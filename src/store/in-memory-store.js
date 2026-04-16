@@ -19,6 +19,10 @@ export class InMemoryStore extends LotPilotStore {
     return dealer;
   }
 
+  async listDealers() {
+    return [...this.dealers.values()];
+  }
+
   async getDealer(dealerId) {
     return this.dealers.get(dealerId) ?? null;
   }
@@ -26,6 +30,11 @@ export class InMemoryStore extends LotPilotStore {
   async saveRooftop(rooftop) {
     this.rooftops.set(rooftop.id, rooftop);
     return rooftop;
+  }
+
+  async listRooftops({ dealerId } = {}) {
+    const rooftops = [...this.rooftops.values()];
+    return dealerId ? rooftops.filter((rooftop) => rooftop.dealerId === dealerId) : rooftops;
   }
 
   async getRooftop(rooftopId) {
@@ -56,7 +65,9 @@ export class InMemoryStore extends LotPilotStore {
   }
 
   async listSyncRuns({ rooftopId, inventorySourceId, status } = {}) {
-    const syncRuns = [...this.syncRuns.values()];
+    const syncRuns = [...this.syncRuns.values()].sort((left, right) =>
+      right.startedAt.localeCompare(left.startedAt)
+    );
     return syncRuns.filter((syncRun) => {
       if (rooftopId && syncRun.rooftopId !== rooftopId) {
         return false;

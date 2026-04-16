@@ -68,8 +68,16 @@ export function createHttpServer({ service = createDefaultService() } = {}) {
         return sendJson(response, 201, await service.createDealer(await readJson(request)));
       }
 
+      if (request.method === 'GET' && pathname === '/api/dealers') {
+        return sendJson(response, 200, await service.listDealers());
+      }
+
       if (request.method === 'POST' && pathname === '/api/rooftops') {
         return sendJson(response, 201, await service.createRooftop(await readJson(request)));
+      }
+
+      if (request.method === 'GET' && pathname === '/api/rooftops') {
+        return sendJson(response, 200, await service.listRooftops({ dealerId: searchParams.get('dealerId') }));
       }
 
       if (request.method === 'POST' && pathname === '/api/inventory-sources') {
@@ -109,6 +117,16 @@ export function createHttpServer({ service = createDefaultService() } = {}) {
       const rooftopHealthMatch = matchPath(pathname, '/api/rooftops/:rooftopId/health');
       if (request.method === 'GET' && rooftopHealthMatch) {
         return sendJson(response, 200, await service.getRooftopHealth(rooftopHealthMatch.rooftopId));
+      }
+
+      const rooftopMatch = matchPath(pathname, '/api/rooftops/:rooftopId');
+      if (request.method === 'GET' && rooftopMatch) {
+        return sendJson(response, 200, await service.getRooftop(rooftopMatch.rooftopId));
+      }
+
+      const rooftopDashboardMatch = matchPath(pathname, '/api/rooftops/:rooftopId/dashboard');
+      if (request.method === 'GET' && rooftopDashboardMatch) {
+        return sendJson(response, 200, await service.getRooftopDashboard(rooftopDashboardMatch.rooftopId));
       }
 
       const staleVehicleMatch = matchPath(pathname, '/api/rooftops/:rooftopId/stale-vehicles');
@@ -166,6 +184,11 @@ export function createHttpServer({ service = createDefaultService() } = {}) {
         return sendJson(response, 201, await service.createLead(await readJson(request)));
       }
 
+      const dealerMatch = matchPath(pathname, '/api/dealers/:dealerId');
+      if (request.method === 'GET' && dealerMatch) {
+        return sendJson(response, 200, await service.getDealer(dealerMatch.dealerId));
+      }
+
       const inventorySourceMatch = matchPath(pathname, '/api/inventory-sources/:inventorySourceId');
       if (request.method === 'GET' && inventorySourceMatch) {
         return sendJson(response, 200, await service.getInventorySource(inventorySourceMatch.inventorySourceId));
@@ -179,6 +202,11 @@ export function createHttpServer({ service = createDefaultService() } = {}) {
       const syncRunMatch = matchPath(pathname, '/api/sync-runs/:syncRunId');
       if (request.method === 'GET' && syncRunMatch) {
         return sendJson(response, 200, await service.getSyncRun(syncRunMatch.syncRunId));
+      }
+
+      const leadMatch = matchPath(pathname, '/api/leads/:leadId');
+      if (request.method === 'GET' && leadMatch) {
+        return sendJson(response, 200, await service.getLead(leadMatch.leadId));
       }
 
       const leadAssignMatch = matchPath(pathname, '/api/leads/:leadId/assign');

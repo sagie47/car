@@ -118,6 +118,33 @@ test('http server exposes inventory-source creation and sync endpoints', async (
   });
   const syncResult = await syncResponse.json();
 
+  const dealersResponse = await fetch(`${baseUrl}/api/dealers`);
+  const dealers = await dealersResponse.json();
+  const dealerDetailResponse = await fetch(`${baseUrl}/api/dealers/${dealer.id}`);
+  const dealerDetail = await dealerDetailResponse.json();
+  const rooftopsResponse = await fetch(`${baseUrl}/api/rooftops?dealerId=${dealer.id}`);
+  const rooftops = await rooftopsResponse.json();
+  const rooftopDetailResponse = await fetch(`${baseUrl}/api/rooftops/${rooftop.id}`);
+  const rooftopDetail = await rooftopDetailResponse.json();
+  const dashboardResponse = await fetch(`${baseUrl}/api/rooftops/${rooftop.id}/dashboard`);
+  const dashboard = await dashboardResponse.json();
+  const vehiclesResponse = await fetch(`${baseUrl}/api/vehicles?rooftopId=${rooftop.id}`);
+  const vehicles = await vehiclesResponse.json();
+
+  const leadCreateResponse = await fetch(`${baseUrl}/api/leads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      rooftopId: rooftop.id,
+      vehicleId: vehicles[0].id,
+      sourceChannel: 'marketplace',
+      sourceSubchannel: 'messenger'
+    })
+  });
+  const lead = await leadCreateResponse.json();
+  const leadDetailResponse = await fetch(`${baseUrl}/api/leads/${lead.id}`);
+  const leadDetail = await leadDetailResponse.json();
+
   const listSourceResponse = await fetch(`${baseUrl}/api/inventory-sources?rooftopId=${rooftop.id}`);
   const listSourceResult = await listSourceResponse.json();
   const syncRunResponse = await fetch(`${baseUrl}/api/sync-runs/${syncResult.syncRun.id}`);
@@ -125,9 +152,22 @@ test('http server exposes inventory-source creation and sync endpoints', async (
 
   assert.equal(sourceResponse.status, 201);
   assert.equal(syncResponse.status, 200);
+  assert.equal(dealersResponse.status, 200);
+  assert.equal(dealerDetailResponse.status, 200);
+  assert.equal(rooftopsResponse.status, 200);
+  assert.equal(rooftopDetailResponse.status, 200);
+  assert.equal(dashboardResponse.status, 200);
+  assert.equal(leadCreateResponse.status, 201);
+  assert.equal(leadDetailResponse.status, 200);
   assert.equal(syncResult.summary.createdVehicles, 1);
+  assert.equal(dealers.length, 1);
+  assert.equal(dealerDetail.id, dealer.id);
+  assert.equal(rooftops.length, 1);
+  assert.equal(rooftopDetail.id, rooftop.id);
+  assert.equal(dashboard.vehicleCounts.total, 1);
   assert.equal(listSourceResult.length, 1);
   assert.equal(syncRun.status, 'completed');
+  assert.equal(leadDetail.id, lead.id);
 
   await feedServer.close();
   await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));

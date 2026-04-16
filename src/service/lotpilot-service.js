@@ -54,6 +54,19 @@ export class LotPilotService {
     return this.store.saveDealer(dealer);
   }
 
+  async listDealers() {
+    return this.store.listDealers();
+  }
+
+  async getDealer(dealerId) {
+    const dealer = await this.store.getDealer(dealerId);
+    if (!dealer) {
+      throw new Error(`Dealer ${dealerId} was not found`);
+    }
+
+    return dealer;
+  }
+
   async createRooftop(payload) {
     if (!payload?.dealerId) {
       throw new Error('dealerId is required');
@@ -85,6 +98,19 @@ export class LotPilotService {
     };
 
     return this.store.saveRooftop(rooftop);
+  }
+
+  async listRooftops({ dealerId } = {}) {
+    return this.store.listRooftops({ dealerId });
+  }
+
+  async getRooftop(rooftopId) {
+    const rooftop = await this.store.getRooftop(rooftopId);
+    if (!rooftop) {
+      throw new Error(`Rooftop ${rooftopId} was not found`);
+    }
+
+    return rooftop;
   }
 
   async createInventorySource(payload) {
@@ -142,6 +168,15 @@ export class LotPilotService {
     return this.store.listLeads({ rooftopId, status });
   }
 
+  async getLead(leadId) {
+    const lead = await this.store.getLead(leadId);
+    if (!lead) {
+      throw new Error(`Lead ${leadId} was not found`);
+    }
+
+    return lead;
+  }
+
   async getSyncRun(syncRunId) {
     const syncRun = await this.store.getSyncRun(syncRunId);
     if (!syncRun) {
@@ -153,6 +188,111 @@ export class LotPilotService {
 
   async listSyncRuns({ rooftopId, inventorySourceId, status } = {}) {
     return this.store.listSyncRuns({ rooftopId, inventorySourceId, status });
+  }
+
+  async getRooftopDashboard(rooftopId) {
+    const rooftop = await this.getRooftop(rooftopId);
+    const [health, vehicles, listings, leads, inventorySources, syncRuns] = await Promise.all([
+      this.getRooftopHealth(rooftopId),
+      this.listVehicles({ rooftopId }),
+      this.listListings({ rooftopId }),
+      this.listLeads({ rooftopId }),
+      this.listInventorySources({ rooftopId }),
+      this.listSyncRuns({ rooftopId })
+    ]);
+
+    const vehicleCounts = vehicles.reduce(
+      (counts, vehicle) => {
+        counts.total += 1;
+
+        if (vehicle.eligibility?.status === 'blocked') {
+          counts.blocked += 1;
+        } else if (vehicle.eligibility?.status === 'eligible_with_warning') {
+          counts.withWarnings += 1;
+          counts.eligible += 1;
+        } else {
+          counts.eligible += 1;
+        }
+
+        if (vehicle.isStale) {
+          counts.stale += 1;
+        }
+
+        if ((vehicle.syncIssues?.length ?? 0) > 0) {
+          counts.withSyncIssues += 1;
+        }
+
+        return counts;
+      },
+      {
+        total: 0,
+        eligible: 0,
+        blocked: 0,
+        withWarnings: 0,
+        stale: 0,
+        withSyncIssues: 0
+      }
+    );
+
+    const listingCounts = listings.reduce(
+      (counts, listing) => {
+        counts.total += 1;
+        counts.byState[listing.state] = (counts.byState[listing.state] ?? 0) + 1;
+
+        if (listing.state !== 'removed') {
+          counts.active += 1;
+        }
+
+        if (listing.state === 'published') {
+          counts.published += 1;
+        }
+
+        if (
+          listing.state === 'publish_failed' ||
+          listing.state === 'removal_failed' ||
+          listing.state === 'needs_manual_review'
+        ) {
+          counts.needingAttention += 1;
+        }
+
+        return counts;
+      },
+      {
+        total: 0,
+        active: 0,
+        published: 0,
+        needingAttention: 0,
+        byState: {}
+      }
+    );
+
+    const leadCounts = leads.reduce(
+      (counts, lead) => {
+        counts.total += 1;
+        counts.byStatus[lead.status] = (counts.byStatus[lead.status] ?? 0) + 1;
+
+        if (!lead.assignedRepId) {
+          counts.unassigned += 1;
+        }
+
+        return counts;
+      },
+      {
+        total: 0,
+        unassigned: 0,
+        byStatus: {}
+      }
+    );
+
+    return {
+      rooftop,
+      health,
+      latestSyncRun: syncRuns[0] ?? null,
+      inventorySources,
+      vehicleCounts,
+      listingCounts,
+      leadCounts
+    };
   }
 
   async getRooftopHealth(rooftopId) {
