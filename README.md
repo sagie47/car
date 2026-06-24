@@ -8,7 +8,7 @@ listing assets, coordinates publish/update/remove work, boosts stale units with
 fresh content, and gives store teams a lightweight way to handle resulting
 leads faster.
 
-The product wedge is reliability, stale-unit workflow, and low setup burden.
+The product wedge is fast, cheap, dealer-safe inventory distribution with low setup burden.
 LotPilot is not trying to be a full CRM, a broad social suite, or an agency
 replacement.
 
@@ -21,6 +21,7 @@ and refreshes stale units with new content.
 ## Primary deliverable
 
 - Product requirements document: [docs/PRD-LotPilot.md](docs/PRD-LotPilot.md)
+- Phase 0 validation sprint plan: [docs/phase-0-validation-sprint.md](docs/phase-0-validation-sprint.md)
 
 ## Current implementation
 
