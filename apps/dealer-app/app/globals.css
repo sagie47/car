@@ -328,3 +328,14 @@ textarea {
     padding: 20px;
   }
 }
+
+.listing-preview h3 {
+  margin-top: 4px;
+}
+
+.check-list {
+  display: grid;
+  gap: 8px;
+  padding-left: 20px;
+  margin: 0;
+}

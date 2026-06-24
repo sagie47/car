@@ -7,6 +7,7 @@ import type { PropsWithChildren } from 'react';
 const NAV_ITEMS = [
   { href: '/', label: 'Overview' },
   { href: '/setup', label: 'Setup' },
+  { href: '/validation', label: 'Validation' },
   { href: '/vehicles', label: 'Vehicles' },
   { href: '/listings', label: 'Listings' },
   { href: '/stale', label: 'Stale Queue' },

@@ -123,6 +123,22 @@ export type Listing = {
     title: string;
     shortDescription: string;
     longDescription: string;
+    marketplacePost?: {
+      channel: string;
+      workflow: string;
+      title: string;
+      price: number | null;
+      category: string;
+      description: string;
+      contactBlock: string;
+      photoUrls: string[];
+      checklist: string[];
+      copyBlocks: {
+        title: string;
+        price: string;
+        description: string;
+      };
+    };
     ctaBlock: string;
     tonePreset: string;
     photoOrderRecommendation: Array<{ url: string; position: number; reason: string }>;

@@ -56,6 +56,34 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
         />
       </Card>
 
+      {listing.draft.marketplacePost ? (
+        <Card title="Facebook Marketplace post" subtitle="Copy-and-approve output for the assisted posting workflow." accent="blue">
+          <div className="stack">
+            <DataTable
+              columns={['Field', 'Copy-ready value']}
+              rows={[
+                ['Title', listing.draft.marketplacePost.copyBlocks.title],
+                ['Price', listing.draft.marketplacePost.copyBlocks.price || 'No price'],
+                ['Channel', listing.draft.marketplacePost.channel.replace(/_/g, ' ')],
+                ['Workflow', listing.draft.marketplacePost.workflow.replace(/_/g, ' ')]
+              ]}
+            />
+            <div>
+              <p><strong>Description</strong></p>
+              <pre className="mono-copy">{listing.draft.marketplacePost.copyBlocks.description}</pre>
+            </div>
+            <div>
+              <p><strong>Posting checklist</strong></p>
+              <ul className="check-list">
+                {listing.draft.marketplacePost.checklist.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
       <Card title="Draft body" accent="amber">
         <pre className="mono-copy">{listing.draft.longDescription}</pre>
       </Card>
