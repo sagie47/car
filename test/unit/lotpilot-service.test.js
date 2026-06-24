@@ -69,6 +69,9 @@ test('inventory ingest upserts by VIN and creates a listing draft', async () => 
   assert.equal(vehicle.eligibility.status, 'eligible');
   assert.equal(listing.state, 'draft_created');
   assert.equal(listing.draft.title, '2021 Toyota Camry SE');
+  assert.equal(listing.draft.marketplacePost.channel, 'facebook_marketplace');
+  assert.equal(listing.draft.marketplacePost.workflow, 'copy_and_approve');
+  assert.equal(listing.draft.marketplacePost.copyBlocks.title, '2021 Toyota Camry SE · 18k mi · $25,995');
 
   await service.ingestInventory({
     rooftopId: rooftop.id,
@@ -122,6 +125,37 @@ test('sold inventory queues an existing published listing for removal', async ()
   const updatedListing = await service.getListing(listing.id);
   assert.equal(updatedListing.state, 'queued_for_remove');
   assert.equal(updatedListing.events.at(-1).reason, 'Vehicle became ineligible');
+});
+
+
+test('marketplace draft includes rooftop contact block and value-price checklist', async () => {
+  const { service } = createServiceContext();
+  const dealer = await service.createDealer({ name: 'Value Auto' });
+  const rooftop = await service.createRooftop({
+    dealerId: dealer.id,
+    name: 'Value Auto Main',
+    location: 'Austin, TX',
+    phone: '555-0100'
+  });
+
+  await service.ingestInventory({
+    rooftopId: rooftop.id,
+    sourceType: 'feed',
+    vehicles: [buildVehicle({ price: 9995, mileage: 96240 })],
+    tonePreset: 'value-focused'
+  });
+
+  const [listing] = await service.listListings({ rooftopId: rooftop.id });
+  const marketplacePost = listing.draft.marketplacePost;
+
+  assert.equal(marketplacePost.title, '2021 Toyota Camry SE · 96k mi · $9,995');
+  assert.match(marketplacePost.description, /Dealer: Value Auto Main/);
+  assert.match(marketplacePost.description, /Call\/Text: 555-0100/);
+  assert.equal(
+    marketplacePost.checklist.some((item) => item.includes('Marketplace sweet spot')),
+    true
+  );
+  assert.equal(listing.draft.generator.autoApproved, false);
 });
 
 test('lead assignment and status updates are tracked', async () => {

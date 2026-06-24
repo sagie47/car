@@ -407,7 +407,8 @@ export class LotPilotService {
           vehicle,
           buildListingDraft(vehicle, {
             tonePreset,
-            rules
+            rules,
+            rooftop
           })
         );
         summary.createdListings += 1;
@@ -423,7 +424,8 @@ export class LotPilotService {
         ...listing,
         draft: buildListingDraft(vehicle, {
           tonePreset: listing.draft?.tonePreset ?? tonePreset,
-          rules
+          rules,
+          rooftop
         }),
         updatedAt: nowIso()
       };
@@ -586,7 +588,8 @@ export class LotPilotService {
     const listing = await this.store.getListingByVehicleId(vehicle.id);
     const draft = buildListingDraft(vehicle, {
       ...options,
-      rules: rooftop?.rules
+      rules: rooftop?.rules,
+      rooftop
     });
 
     if (!listing) {
