@@ -18,11 +18,24 @@ function buildUrl(path: string) {
   return `${API_BASE_URL}${path}`;
 }
 
+async function getAccessToken() {
+  if (typeof window !== 'undefined') {
+    const { getBrowserSupabase } = await import('./supabase-browser');
+    const supabase = getBrowserSupabase();
+    if (!supabase) return null;
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token ?? null;
+  }
+  return process.env.LOT_PILOT_SERVER_API_TOKEN ?? null;
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const accessToken = await getAccessToken();
   const response = await fetch(buildUrl(path), {
     ...init,
     headers: {
       'Content-Type': 'application/json',
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...(init?.headers ?? {})
     },
     cache: 'no-store'
@@ -105,12 +118,20 @@ export async function createInventorySource(payload: {
   name: string;
   type: string;
   format: string;
-  sourceUrl: string;
+  sourceUrl?: string | null;
+  sourceConfig?: Record<string, unknown>;
   isActive?: boolean;
 }) {
   return requestJson<InventorySource>('/api/inventory-sources', {
     method: 'POST',
     body: JSON.stringify(payload)
+  });
+}
+
+export async function uploadCsvInventorySource(inventorySourceId: string, csvText: string, fileName: string) {
+  return requestJson<InventorySource>(`/api/inventory-sources/${inventorySourceId}/csv`, {
+    method: 'POST',
+    body: JSON.stringify({ csvText, fileName })
   });
 }
 
@@ -173,6 +194,23 @@ export async function transitionListing(
   return requestJson<Listing>(`/api/listings/${listingId}/transitions`, {
     method: 'POST',
     body: JSON.stringify(payload)
+  });
+}
+
+export async function updateListingDraft(
+  listingId: string,
+  payload: { title?: string; price?: number | null; description?: string; photoUrls?: string[] }
+) {
+  return requestJson<Listing>(`/api/listings/${listingId}/draft`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function recordListingActivity(listingId: string, type: 'copied' | 'exported', metadata: Record<string, unknown>) {
+  return requestJson<Listing>(`/api/listings/${listingId}/activities`, {
+    method: 'POST',
+    body: JSON.stringify({ type, metadata })
   });
 }
 

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { IBM_Plex_Mono, Space_Grotesk } from 'next/font/google';
 import type { PropsWithChildren } from 'react';
 import { AppShell } from '../components/app-shell';
+import { AuthGate } from '../components/auth-gate';
 import './globals.css';
 
 const spaceGrotesk = Space_Grotesk({
@@ -24,7 +25,9 @@ export default function RootLayout({ children }: PropsWithChildren) {
   return (
     <html lang="en">
       <body className={`${spaceGrotesk.variable} ${plexMono.variable}`}>
-        <AppShell>{children}</AppShell>
+        <AuthGate>
+          <AppShell>{children}</AppShell>
+        </AuthGate>
       </body>
     </html>
   );

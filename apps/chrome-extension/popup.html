@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LotPilot Autofill</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="panel">
+      <header>
+        <p class="eyebrow">LotPilot</p>
+        <h1>Marketplace Autofill</h1>
+        <p class="muted">Pull reviewed listing copy and fill the active browser tab.</p>
+      </header>
+
+      <label>
+        <span>API base URL</span>
+        <input id="apiBaseUrl" placeholder="http://127.0.0.1:3000">
+      </label>
+
+      <label>
+        <span>Listing ID</span>
+        <input id="listingId" placeholder="listing_...">
+      </label>
+
+      <label>
+        <span>Bearer token or server API token</span>
+        <input id="accessToken" type="password" placeholder="Optional for local auth-disabled dev">
+      </label>
+
+      <div class="button-row">
+        <button id="loadListing" type="button">Load</button>
+        <button id="postAssist" type="button" class="primary">Post Assist</button>
+      </div>
+
+      <section id="preview" class="preview" hidden></section>
+
+      <div class="button-grid">
+        <button id="fillText" type="button">Fill Text</button>
+        <button id="uploadPhotos" type="button">Auto Upload Photos</button>
+        <button id="downloadPhotos" type="button">Download Photos</button>
+        <button id="clearToken" type="button" class="secondary">Clear Token</button>
+      </div>
+
+      <section id="steps" class="steps" hidden></section>
+      <p id="status" class="status" role="status"></p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

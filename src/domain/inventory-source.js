@@ -1,11 +1,15 @@
 import { createId, isHttpUrl, nowIso } from '../lib/utils.js';
 
 export const INVENTORY_SOURCE_TYPES = {
-  XML_FEED_URL: 'xml_feed_url'
+  XML_FEED_URL: 'xml_feed_url',
+  WEBSITE_INVENTORY_URL: 'website_inventory_url',
+  CSV_UPLOAD: 'csv_upload'
 };
 
 export const INVENTORY_SOURCE_FORMATS = {
-  GENERIC_XML_V1: 'generic_xml_v1'
+  GENERIC_XML_V1: 'generic_xml_v1',
+  FIRECRAWL_STRUCTURED_V1: 'firecrawl_structured_v1',
+  GENERIC_CSV_V1: 'generic_csv_v1'
 };
 
 const VALID_TYPES = new Set(Object.values(INVENTORY_SOURCE_TYPES));
@@ -28,8 +32,22 @@ export function validateInventorySourcePayload(payload) {
     throw new Error(`Unsupported inventory source format '${payload?.format ?? ''}'`);
   }
 
-  if (!isHttpUrl(payload.sourceUrl)) {
+  const requiresUrl = payload.type !== INVENTORY_SOURCE_TYPES.CSV_UPLOAD;
+  if (requiresUrl && !isHttpUrl(payload.sourceUrl)) {
     throw new Error('sourceUrl must be a valid http or https URL');
+  }
+
+  if (!requiresUrl && payload.sourceUrl) {
+    throw new Error('CSV uploads must not include sourceUrl');
+  }
+
+  const formatByType = {
+    [INVENTORY_SOURCE_TYPES.XML_FEED_URL]: INVENTORY_SOURCE_FORMATS.GENERIC_XML_V1,
+    [INVENTORY_SOURCE_TYPES.WEBSITE_INVENTORY_URL]: INVENTORY_SOURCE_FORMATS.FIRECRAWL_STRUCTURED_V1,
+    [INVENTORY_SOURCE_TYPES.CSV_UPLOAD]: INVENTORY_SOURCE_FORMATS.GENERIC_CSV_V1
+  };
+  if (formatByType[payload.type] !== payload.format) {
+    throw new Error(`Unsupported format '${payload.format}' for source type '${payload.type}'`);
   }
 }
 
@@ -44,7 +62,8 @@ export function createInventorySourceRecord(payload) {
     name: payload.name,
     type: payload.type,
     format: payload.format,
-    sourceUrl: payload.sourceUrl,
+    sourceUrl: payload.sourceUrl ?? null,
+    sourceConfig: payload.sourceConfig ?? {},
     isActive: payload.isActive ?? true,
     lastSyncedAt: null,
     lastSyncStatus: null,

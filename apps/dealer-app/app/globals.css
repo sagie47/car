@@ -262,6 +262,44 @@ textarea {
   align-items: center;
 }
 
+.photo-row {
+  align-items: center;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+}
+
+.button-compact {
+  padding: 0.35rem 0.55rem;
+}
+
+.auth-screen {
+  align-items: center;
+  display: grid;
+  min-height: 100vh;
+  padding: 1.5rem;
+  place-items: center;
+}
+
+.auth-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 12px 12px 0 var(--ink);
+  max-width: 32rem;
+  padding: 2rem;
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  .photo-row {
+    grid-template-columns: 1fr auto auto;
+  }
+
+  .photo-row .mono-copy {
+    grid-column: 1 / -1;
+  }
+}
+
 .field-grid > * {
   flex: 1 1 220px;
 }

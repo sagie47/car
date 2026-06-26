@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LotPilot Extension Test Page</title>
+    <style>
+      :root {
+        --ink: #18231d;
+        --paper: #f7f1e4;
+        --line: #d7cbb4;
+        --accent: #17694a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 85% 15%, rgba(23, 105, 74, 0.22), transparent 28%),
+          linear-gradient(135deg, #fbf7ef, #e8dcc6);
+        color: var(--ink);
+        font: 16px/1.45 Georgia, "Times New Roman", serif;
+      }
+
+      main {
+        display: grid;
+        gap: 18px;
+        margin: 0 auto;
+        max-width: 760px;
+        padding: 48px 20px;
+      }
+
+      h1,
+      p {
+        margin: 0;
+      }
+
+      form {
+        background: rgba(255, 250, 240, 0.82);
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        box-shadow: 0 18px 60px rgba(24, 35, 29, 0.12);
+        display: grid;
+        gap: 16px;
+        padding: 24px;
+      }
+
+      label {
+        display: grid;
+        gap: 7px;
+        font-weight: 700;
+      }
+
+      input,
+      textarea,
+      [contenteditable] {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        font: 15px/1.4 "Courier New", monospace;
+        min-height: 44px;
+        padding: 11px 12px;
+      }
+
+      textarea,
+      [contenteditable] {
+        min-height: 140px;
+      }
+
+      .dropzone {
+        border: 2px dashed var(--accent);
+        border-radius: 18px;
+        display: grid;
+        gap: 10px;
+        padding: 20px;
+      }
+
+      .status {
+        color: var(--accent);
+        font-family: "Courier New", monospace;
+        min-height: 22px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>LotPilot Extension Test Page</h1>
+        <p>Open this page, load the unpacked extension, set a listing ID, then test Fill Text and Auto Upload Photos.</p>
+      </header>
+
+      <form>
+        <label>
+          Title
+          <input aria-label="Title" placeholder="Vehicle title">
+        </label>
+
+        <label>
+          Price
+          <input aria-label="Price" inputmode="numeric" placeholder="Asking price">
+        </label>
+
+        <label>
+          Description
+          <textarea aria-label="Description" placeholder="Vehicle description"></textarea>
+        </label>
+
+        <section class="dropzone" role="button" aria-label="Add photos">
+          <strong>Add photos</strong>
+          <input id="photos" aria-label="Photo upload" type="file" accept="image/*" multiple>
+          <p id="photoStatus" class="status">No files selected.</p>
+        </section>
+      </form>
+    </main>
+
+    <script>
+      const photos = document.getElementById('photos');
+      const photoStatus = document.getElementById('photoStatus');
+      photos.addEventListener('change', () => {
+        const names = Array.from(photos.files || []).map((file) => file.name);
+        photoStatus.textContent = names.length ? names.join(', ') : 'No files selected.';
+      });
+    </script>
+  </body>
+</html>

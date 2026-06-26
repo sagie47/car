@@ -27,7 +27,8 @@ export type InventorySource = {
   name: string;
   type: string;
   format: string;
-  sourceUrl: string;
+  sourceUrl: string | null;
+  sourceConfig: Record<string, unknown>;
   isActive: boolean;
   lastSyncedAt: string | null;
   lastSyncStatus: string | null;
@@ -111,6 +112,7 @@ export type ListingEvent = {
   actor: string;
   reason: string | null;
   metadata: Record<string, unknown>;
+  eventType: string;
   createdAt: string;
 };
 
@@ -150,6 +152,14 @@ export type Listing = {
       approvedBy: string | null;
       autoApproved: boolean;
     };
+    overrides?: {
+      title: string | null;
+      price: number | null;
+      description: string | null;
+      photoUrls: string[] | null;
+      updatedAt: string | null;
+      updatedBy: string | null;
+    };
   };
   createdAt: string;
   updatedAt: string;
@@ -179,6 +189,11 @@ export type Lead = {
   sold: boolean;
   attributedValue: number | null;
   suggestedResponse: string;
+  contactName: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  sourceMessage: string | null;
+  externalId: string | null;
   events: LeadEvent[];
 };
 

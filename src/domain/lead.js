@@ -50,6 +50,11 @@ export function createLeadRecord(payload, vehicle) {
     sold: Boolean(payload.sold),
     attributedValue: payload.attributedValue ?? null,
     suggestedResponse: payload.suggestedResponse ?? buildSuggestedResponse(vehicle),
+    contactName: payload.contactName ?? null,
+    contactEmail: payload.contactEmail ?? null,
+    contactPhone: payload.contactPhone ?? null,
+    sourceMessage: payload.sourceMessage ?? null,
+    externalId: payload.externalId ?? null,
     events: [createLeadEvent('created')]
   };
 }

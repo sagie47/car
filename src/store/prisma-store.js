@@ -18,6 +18,58 @@ function mapDealer(record) {
     : null;
 }
 
+function mapUserProfile(record) {
+  return record
+    ? {
+        id: record.id,
+        email: record.email,
+        displayName: record.displayName,
+        phone: record.phone,
+        createdAt: record.createdAt.toISOString(),
+        updatedAt: record.updatedAt.toISOString()
+      }
+    : null;
+}
+
+function mapMembership(record) {
+  return record
+    ? {
+        id: record.id,
+        dealerId: record.dealerId,
+        userId: record.userId,
+        role: record.role,
+        createdAt: record.createdAt.toISOString()
+      }
+    : null;
+}
+
+function mapRooftopAccess(record) {
+  return record
+    ? {
+        id: record.id,
+        rooftopId: record.rooftopId,
+        userId: record.userId,
+        createdAt: record.createdAt.toISOString()
+      }
+    : null;
+}
+
+function mapInvitation(record) {
+  return record
+    ? {
+        id: record.id,
+        dealerId: record.dealerId,
+        email: record.email,
+        role: record.role,
+        rooftopIds: cloneJson(record.rooftopIds, []),
+        status: record.status,
+        invitedById: record.invitedById,
+        createdAt: record.createdAt.toISOString(),
+        acceptedAt: record.acceptedAt?.toISOString() ?? null
+      }
+    : null;
+}
+
 function mapRooftop(record) {
   return record
     ? {
@@ -44,6 +96,7 @@ function mapInventorySource(record) {
         type: record.type,
         format: record.format,
         sourceUrl: record.sourceUrl,
+        sourceConfig: cloneJson(record.sourceConfig, {}),
         isActive: record.isActive,
         lastSyncedAt: record.lastSyncedAt?.toISOString() ?? null,
         lastSyncStatus: record.lastSyncStatus ?? null,
@@ -147,6 +200,7 @@ function mapListing(record) {
       actor: event.actor,
       reason: event.reason,
       metadata: cloneJson(event.metadata, {}),
+      eventType: event.eventType,
       createdAt: event.createdAt.toISOString()
     }))
   };
@@ -172,6 +226,11 @@ function mapLead(record) {
     sold: record.sold,
     attributedValue: record.attributedValue,
     suggestedResponse: record.suggestedResponse,
+    contactName: record.contactName,
+    contactEmail: record.contactEmail,
+    contactPhone: record.contactPhone,
+    sourceMessage: record.sourceMessage,
+    externalId: record.externalId,
     events: (record.events ?? []).map((event) => ({
       id: event.id,
       type: event.type,
@@ -180,6 +239,52 @@ function mapLead(record) {
       createdAt: event.createdAt.toISOString()
     }))
   };
+}
+
+function mapNotificationRecipient(record) {
+  return record
+    ? {
+        id: record.id,
+        rooftopId: record.rooftopId,
+        userId: record.userId,
+        channel: record.channel,
+        destination: record.destination,
+        isActive: record.isActive,
+        createdAt: record.createdAt.toISOString(),
+        updatedAt: record.updatedAt.toISOString()
+      }
+    : null;
+}
+
+function mapInboundEvent(record) {
+  return record
+    ? {
+        id: record.id,
+        provider: record.provider,
+        externalId: record.externalId,
+        rooftopId: record.rooftopId,
+        leadId: record.leadId,
+        payload: cloneJson(record.payload, {}),
+        receivedAt: record.receivedAt.toISOString()
+      }
+    : null;
+}
+
+function mapNotificationDelivery(record) {
+  return record
+    ? {
+        id: record.id,
+        leadId: record.leadId,
+        recipientId: record.recipientId,
+        channel: record.channel,
+        status: record.status,
+        attempts: record.attempts,
+        providerId: record.providerId,
+        lastError: record.lastError,
+        createdAt: record.createdAt.toISOString(),
+        updatedAt: record.updatedAt.toISOString()
+      }
+    : null;
 }
 
 export class PrismaStore extends LotPilotStore {
@@ -215,6 +320,141 @@ export class PrismaStore extends LotPilotStore {
 
   async getDealer(dealerId) {
     return mapDealer(await this.client.dealer.findUnique({ where: { id: dealerId } }));
+  }
+
+  async saveUserProfile(user) {
+    const record = await this.client.userProfile.upsert({
+      where: { id: user.id },
+      update: {
+        email: user.email,
+        displayName: toNullable(user.displayName),
+        phone: toNullable(user.phone),
+        createdAt: new Date(user.createdAt),
+        updatedAt: new Date(user.updatedAt)
+      },
+      create: {
+        id: user.id,
+        email: user.email,
+        displayName: toNullable(user.displayName),
+        phone: toNullable(user.phone),
+        createdAt: new Date(user.createdAt),
+        updatedAt: new Date(user.updatedAt)
+      }
+    });
+
+    return mapUserProfile(record);
+  }
+
+  async getUserProfile(userId) {
+    return mapUserProfile(await this.client.userProfile.findUnique({ where: { id: userId } }));
+  }
+
+  async getUserProfileByEmail(email) {
+    return mapUserProfile(await this.client.userProfile.findUnique({ where: { email } }));
+  }
+
+  async saveMembership(membership) {
+    const record = await this.client.dealerMembership.upsert({
+      where: { dealerId_userId: { dealerId: membership.dealerId, userId: membership.userId } },
+      update: {
+        role: membership.role,
+        createdAt: new Date(membership.createdAt)
+      },
+      create: {
+        id: membership.id,
+        dealerId: membership.dealerId,
+        userId: membership.userId,
+        role: membership.role,
+        createdAt: new Date(membership.createdAt)
+      }
+    });
+
+    return mapMembership(record);
+  }
+
+  async getMembership({ dealerId, userId }) {
+    return mapMembership(
+      await this.client.dealerMembership.findUnique({ where: { dealerId_userId: { dealerId, userId } } })
+    );
+  }
+
+  async listMemberships({ dealerId, userId } = {}) {
+    const records = await this.client.dealerMembership.findMany({
+      where: {
+        ...(dealerId ? { dealerId } : {}),
+        ...(userId ? { userId } : {})
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+    return records.map(mapMembership);
+  }
+
+  async saveRooftopAccess(access) {
+    const record = await this.client.rooftopAccess.upsert({
+      where: { rooftopId_userId: { rooftopId: access.rooftopId, userId: access.userId } },
+      update: { createdAt: new Date(access.createdAt) },
+      create: {
+        id: access.id,
+        rooftopId: access.rooftopId,
+        userId: access.userId,
+        createdAt: new Date(access.createdAt)
+      }
+    });
+    return mapRooftopAccess(record);
+  }
+
+  async listRooftopAccess({ rooftopId, userId } = {}) {
+    const records = await this.client.rooftopAccess.findMany({
+      where: {
+        ...(rooftopId ? { rooftopId } : {}),
+        ...(userId ? { userId } : {})
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+    return records.map(mapRooftopAccess);
+  }
+
+  async saveInvitation(invitation) {
+    const record = await this.client.dealerInvitation.upsert({
+      where: { id: invitation.id },
+      update: {
+        dealerId: invitation.dealerId,
+        email: invitation.email,
+        role: invitation.role,
+        rooftopIds: cloneJson(invitation.rooftopIds, []),
+        status: invitation.status,
+        invitedById: toNullable(invitation.invitedById),
+        createdAt: new Date(invitation.createdAt),
+        acceptedAt: invitation.acceptedAt ? new Date(invitation.acceptedAt) : null
+      },
+      create: {
+        id: invitation.id,
+        dealerId: invitation.dealerId,
+        email: invitation.email,
+        role: invitation.role,
+        rooftopIds: cloneJson(invitation.rooftopIds, []),
+        status: invitation.status,
+        invitedById: toNullable(invitation.invitedById),
+        createdAt: new Date(invitation.createdAt),
+        acceptedAt: invitation.acceptedAt ? new Date(invitation.acceptedAt) : null
+      }
+    });
+    return mapInvitation(record);
+  }
+
+  async getInvitation(invitationId) {
+    return mapInvitation(await this.client.dealerInvitation.findUnique({ where: { id: invitationId } }));
+  }
+
+  async listInvitations({ email, status } = {}) {
+    const records = await this.client.dealerInvitation.findMany({
+      where: {
+        ...(email ? { email } : {}),
+        ...(status ? { status } : {})
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+    return records.map(mapInvitation);
   }
 
   async saveRooftop(rooftop) {
@@ -270,6 +510,7 @@ export class PrismaStore extends LotPilotStore {
         type: inventorySource.type,
         format: inventorySource.format,
         sourceUrl: inventorySource.sourceUrl,
+        sourceConfig: cloneJson(inventorySource.sourceConfig, {}),
         isActive: Boolean(inventorySource.isActive),
         lastSyncedAt: inventorySource.lastSyncedAt ? new Date(inventorySource.lastSyncedAt) : null,
         lastSyncStatus: toNullable(inventorySource.lastSyncStatus),
@@ -283,6 +524,7 @@ export class PrismaStore extends LotPilotStore {
         type: inventorySource.type,
         format: inventorySource.format,
         sourceUrl: inventorySource.sourceUrl,
+        sourceConfig: cloneJson(inventorySource.sourceConfig, {}),
         isActive: Boolean(inventorySource.isActive),
         lastSyncedAt: inventorySource.lastSyncedAt ? new Date(inventorySource.lastSyncedAt) : null,
         lastSyncStatus: toNullable(inventorySource.lastSyncStatus),
@@ -545,6 +787,7 @@ export class PrismaStore extends LotPilotStore {
             actor: event.actor,
             reason: toNullable(event.reason),
             metadata: cloneJson(event.metadata, {}),
+            eventType: event.eventType ?? 'state_transition',
             createdAt: new Date(event.createdAt)
           },
           create: {
@@ -555,6 +798,7 @@ export class PrismaStore extends LotPilotStore {
             actor: event.actor,
             reason: toNullable(event.reason),
             metadata: cloneJson(event.metadata, {}),
+            eventType: event.eventType ?? 'state_transition',
             createdAt: new Date(event.createdAt)
           }
         });
@@ -621,7 +865,12 @@ export class PrismaStore extends LotPilotStore {
           appointmentSet: Boolean(lead.appointmentSet),
           sold: Boolean(lead.sold),
           attributedValue: lead.attributedValue ?? null,
-          suggestedResponse: lead.suggestedResponse
+          suggestedResponse: lead.suggestedResponse,
+          contactName: toNullable(lead.contactName),
+          contactEmail: toNullable(lead.contactEmail),
+          contactPhone: toNullable(lead.contactPhone),
+          sourceMessage: toNullable(lead.sourceMessage),
+          externalId: toNullable(lead.externalId)
         },
         create: {
           id: lead.id,
@@ -637,7 +886,12 @@ export class PrismaStore extends LotPilotStore {
           appointmentSet: Boolean(lead.appointmentSet),
           sold: Boolean(lead.sold),
           attributedValue: lead.attributedValue ?? null,
-          suggestedResponse: lead.suggestedResponse
+          suggestedResponse: lead.suggestedResponse,
+          contactName: toNullable(lead.contactName),
+          contactEmail: toNullable(lead.contactEmail),
+          contactPhone: toNullable(lead.contactPhone),
+          sourceMessage: toNullable(lead.sourceMessage),
+          externalId: toNullable(lead.externalId)
         }
       });
 
@@ -695,5 +949,113 @@ export class PrismaStore extends LotPilotStore {
     });
 
     return records.map(mapLead);
+  }
+
+  async saveNotificationRecipient(recipient) {
+    const where = {
+      rooftopId_channel_destination: {
+        rooftopId: recipient.rooftopId,
+        channel: recipient.channel,
+        destination: recipient.destination
+      }
+    };
+    const record = await this.client.notificationRecipient.upsert({
+      where,
+      update: {
+        userId: toNullable(recipient.userId),
+        isActive: Boolean(recipient.isActive),
+        updatedAt: new Date(recipient.updatedAt)
+      },
+      create: {
+        id: recipient.id,
+        rooftopId: recipient.rooftopId,
+        userId: toNullable(recipient.userId),
+        channel: recipient.channel,
+        destination: recipient.destination,
+        isActive: Boolean(recipient.isActive),
+        createdAt: new Date(recipient.createdAt),
+        updatedAt: new Date(recipient.updatedAt)
+      }
+    });
+    return mapNotificationRecipient(record);
+  }
+
+  async listNotificationRecipients({ rooftopId, isActive } = {}) {
+    const records = await this.client.notificationRecipient.findMany({
+      where: {
+        ...(rooftopId ? { rooftopId } : {}),
+        ...(isActive === undefined ? {} : { isActive })
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+    return records.map(mapNotificationRecipient);
+  }
+
+  async saveInboundEvent(event) {
+    const record = await this.client.inboundEvent.upsert({
+      where: { externalId: event.externalId },
+      update: {
+        provider: event.provider,
+        rooftopId: event.rooftopId,
+        leadId: toNullable(event.leadId),
+        payload: cloneJson(event.payload, {}),
+        receivedAt: new Date(event.receivedAt)
+      },
+      create: {
+        id: event.id,
+        provider: event.provider,
+        externalId: event.externalId,
+        rooftopId: event.rooftopId,
+        leadId: toNullable(event.leadId),
+        payload: cloneJson(event.payload, {}),
+        receivedAt: new Date(event.receivedAt)
+      }
+    });
+    return mapInboundEvent(record);
+  }
+
+  async getInboundEventByExternalId(externalId) {
+    return mapInboundEvent(await this.client.inboundEvent.findUnique({ where: { externalId } }));
+  }
+
+  async saveNotificationDelivery(delivery) {
+    const record = await this.client.notificationDelivery.upsert({
+      where: { id: delivery.id },
+      update: {
+        leadId: delivery.leadId,
+        recipientId: delivery.recipientId,
+        channel: delivery.channel,
+        status: delivery.status,
+        attempts: delivery.attempts,
+        providerId: toNullable(delivery.providerId),
+        lastError: toNullable(delivery.lastError),
+        createdAt: new Date(delivery.createdAt),
+        updatedAt: new Date(delivery.updatedAt)
+      },
+      create: {
+        id: delivery.id,
+        leadId: delivery.leadId,
+        recipientId: delivery.recipientId,
+        channel: delivery.channel,
+        status: delivery.status,
+        attempts: delivery.attempts,
+        providerId: toNullable(delivery.providerId),
+        lastError: toNullable(delivery.lastError),
+        createdAt: new Date(delivery.createdAt),
+        updatedAt: new Date(delivery.updatedAt)
+      }
+    });
+    return mapNotificationDelivery(record);
+  }
+
+  async listNotificationDeliveries({ leadId, status } = {}) {
+    const records = await this.client.notificationDelivery.findMany({
+      where: {
+        ...(leadId ? { leadId } : {}),
+        ...(status ? { status } : {})
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+    return records.map(mapNotificationDelivery);
   }
 }

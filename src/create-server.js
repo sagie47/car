@@ -1,15 +1,20 @@
 import http from 'node:http';
 import { URL } from 'node:url';
 import { createDefaultService } from './service/create-default-service.js';
+import { createSupabaseAuth } from './auth/supabase-auth.js';
+import { authorizeDealerAccess, authorizeRooftopAccess } from './auth/access-control.js';
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
-    'Content-Type': 'application/json; charset=utf-8'
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': process.env.APP_ORIGIN ?? 'http://127.0.0.1:3001',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS'
   });
   response.end(JSON.stringify(payload, null, 2));
 }
 
-async function readJson(request) {
+async function readText(request) {
   const chunks = [];
 
   for await (const chunk of request) {
@@ -17,10 +22,15 @@ async function readJson(request) {
   }
 
   if (!chunks.length) {
-    return {};
+    return '';
   }
 
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+async function readJson(request) {
+  const body = await readText(request);
+  return body ? JSON.parse(body) : {};
 }
 
 function matchPath(pathname, pattern) {
@@ -50,12 +60,31 @@ function matchPath(pathname, pattern) {
   return params;
 }
 
-export function createHttpServer({ service = createDefaultService() } = {}) {
+export function createHttpServer({ service = createDefaultService(), auth = createSupabaseAuth() } = {}) {
   async function handleRequest(request, response) {
     const requestUrl = new URL(request.url, 'http://localhost');
     const { pathname, searchParams } = requestUrl;
 
+    let actorPromise;
+    const getActor = async () => {
+      if (!actorPromise) {
+        actorPromise = auth.authenticate(request.headers.authorization).then(async (identity) => {
+          if (!identity.bypass) {
+            const profile = await service.upsertUserProfile(identity);
+            await service.acceptPendingInvitations(profile);
+          }
+          return identity;
+        });
+      }
+      return actorPromise;
+    };
+    const requireDealer = async (dealerId, minimumRole) =>
+      authorizeDealerAccess({ service, actor: await getActor(), dealerId, minimumRole });
+    const requireRooftop = async (rooftopId, minimumRole) =>
+      authorizeRooftopAccess({ service, actor: await getActor(), rooftopId, minimumRole });
+
     try {
+      if (request.method === 'OPTIONS') return sendJson(response, 204, {});
       if (request.method === 'GET' && pathname === '/health') {
         return sendJson(response, 200, {
           ok: true,
@@ -64,27 +93,119 @@ export function createHttpServer({ service = createDefaultService() } = {}) {
         });
       }
 
+      if (request.method === 'POST' && pathname === '/api/webhooks/resend/inbound') {
+        const rawBody = await readText(request);
+        auth.verifyResendWebhook(rawBody, request.headers);
+        const event = JSON.parse(rawBody);
+        const data = event.data ?? event;
+        const recipient = Array.isArray(data.to) ? data.to[0] : data.to;
+        const rooftopId = String(recipient ?? '').match(/lead\+([^@]+)@/i)?.[1];
+        if (!rooftopId) throw new Error('Inbound email must be addressed to a rooftop lead alias');
+        const messageText = [data.subject, data.text, data.text_body, data.html].filter(Boolean).join('\n');
+        const vehicle = data.vehicleId
+          ? await service.getVehicle(data.vehicleId)
+          : await service.findInboundLeadVehicle(rooftopId, messageText);
+        if (!vehicle || vehicle.rooftopId !== rooftopId) {
+          throw new Error('Could not match the inbound email to a vehicle; create the lead manually');
+        }
+        const externalId = data.email_id ?? data.id ?? event.id;
+        if (!externalId) throw new Error('Inbound email is missing a provider event identifier');
+        return sendJson(
+          response,
+          201,
+          await service.ingestInboundLead({
+            rooftopId,
+            vehicleId: vehicle.id,
+            externalId,
+            payload: {
+              contactName: data.from_name ?? null,
+              contactEmail: data.from ?? null,
+              contactPhone: data.phone ?? null,
+              text: messageText
+            }
+          })
+        );
+      }
+
+      if (request.method === 'GET' && pathname === '/api/me') {
+        const actor = await getActor();
+        const memberships = actor.bypass ? [] : await service.store.listMemberships({ userId: actor.id });
+        return sendJson(response, 200, { actor, memberships });
+      }
+
       if (request.method === 'POST' && pathname === '/api/dealers') {
-        return sendJson(response, 201, await service.createDealer(await readJson(request)));
+        const actor = await getActor();
+        const dealer = await service.createDealer(await readJson(request));
+        if (!actor.bypass) {
+          await service.saveMembership({ dealerId: dealer.id, userId: actor.id, role: 'owner' });
+        }
+        return sendJson(response, 201, dealer);
+      }
+
+      const dealerInviteMatch = matchPath(pathname, '/api/dealers/:dealerId/invitations');
+      if (dealerInviteMatch && request.method === 'POST') {
+        const actor = await getActor();
+        await requireDealer(dealerInviteMatch.dealerId, 'owner');
+        const body = await readJson(request);
+        const invitation = await service.createInvitation({
+          dealerId: dealerInviteMatch.dealerId,
+          email: body.email,
+          role: body.role,
+          rooftopIds: body.rooftopIds ?? [],
+          invitedById: actor.id
+        });
+        await auth.invite(body.email, `${process.env.APP_ORIGIN ?? 'http://127.0.0.1:3001'}/auth/callback`);
+        return sendJson(response, 201, invitation);
       }
 
       if (request.method === 'GET' && pathname === '/api/dealers') {
-        return sendJson(response, 200, await service.listDealers());
+        const actor = await getActor();
+        const dealers = await service.listDealers();
+        if (actor.bypass) return sendJson(response, 200, dealers);
+        const memberships = await service.store.listMemberships({ userId: actor.id });
+        const dealerIds = new Set(memberships.map((membership) => membership.dealerId));
+        return sendJson(response, 200, dealers.filter((dealer) => dealerIds.has(dealer.id)));
       }
 
       if (request.method === 'POST' && pathname === '/api/rooftops') {
-        return sendJson(response, 201, await service.createRooftop(await readJson(request)));
+        const body = await readJson(request);
+        await requireDealer(body.dealerId, 'manager');
+        return sendJson(response, 201, await service.createRooftop(body));
+      }
+
+      const rooftopRecipientMatch = matchPath(pathname, '/api/rooftops/:rooftopId/notification-recipients');
+      if (rooftopRecipientMatch && request.method === 'GET') {
+        await requireRooftop(rooftopRecipientMatch.rooftopId, 'manager');
+        return sendJson(
+          response,
+          200,
+          await service.store.listNotificationRecipients({ rooftopId: rooftopRecipientMatch.rooftopId })
+        );
+      }
+      if (rooftopRecipientMatch && request.method === 'POST') {
+        const actor = await getActor();
+        await requireRooftop(rooftopRecipientMatch.rooftopId, 'manager');
+        const body = await readJson(request);
+        return sendJson(
+          response,
+          201,
+          await service.createNotificationRecipient({ ...body, rooftopId: rooftopRecipientMatch.rooftopId, userId: body.userId ?? actor.id })
+        );
       }
 
       if (request.method === 'GET' && pathname === '/api/rooftops') {
+        if (searchParams.get('dealerId')) await requireDealer(searchParams.get('dealerId'));
         return sendJson(response, 200, await service.listRooftops({ dealerId: searchParams.get('dealerId') }));
       }
 
       if (request.method === 'POST' && pathname === '/api/inventory-sources') {
-        return sendJson(response, 201, await service.createInventorySource(await readJson(request)));
+        const body = await readJson(request);
+        await requireRooftop(body.rooftopId, 'manager');
+        return sendJson(response, 201, await service.createInventorySource(body));
       }
 
       if (request.method === 'GET' && pathname === '/api/inventory-sources') {
+        if (searchParams.get('rooftopId')) await requireRooftop(searchParams.get('rooftopId'));
         return sendJson(
           response,
           200,
@@ -93,20 +214,27 @@ export function createHttpServer({ service = createDefaultService() } = {}) {
       }
 
       if (request.method === 'POST' && pathname === '/api/ingest') {
-        return sendJson(response, 200, await service.ingestInventory(await readJson(request)));
+        const body = await readJson(request);
+        await requireRooftop(body.rooftopId, 'manager');
+        return sendJson(response, 200, await service.ingestInventory(body));
       }
 
       if (request.method === 'GET' && pathname === '/api/vehicles') {
+        if (searchParams.get('rooftopId')) await requireRooftop(searchParams.get('rooftopId'));
         return sendJson(response, 200, await service.listVehicles({ rooftopId: searchParams.get('rooftopId') }));
       }
 
       const vehicleMatch = matchPath(pathname, '/api/vehicles/:vehicleId');
       if (request.method === 'GET' && vehicleMatch) {
-        return sendJson(response, 200, await service.getVehicle(vehicleMatch.vehicleId));
+        const vehicle = await service.getVehicle(vehicleMatch.vehicleId);
+        await requireRooftop(vehicle.rooftopId);
+        return sendJson(response, 200, vehicle);
       }
 
       const vehicleDraftMatch = matchPath(pathname, '/api/vehicles/:vehicleId/draft');
       if (request.method === 'POST' && vehicleDraftMatch) {
+        const vehicle = await service.getVehicle(vehicleDraftMatch.vehicleId);
+        await requireRooftop(vehicle.rooftopId, 'manager');
         return sendJson(
           response,
           200,
@@ -116,36 +244,45 @@ export function createHttpServer({ service = createDefaultService() } = {}) {
 
       const rooftopHealthMatch = matchPath(pathname, '/api/rooftops/:rooftopId/health');
       if (request.method === 'GET' && rooftopHealthMatch) {
+        await requireRooftop(rooftopHealthMatch.rooftopId);
         return sendJson(response, 200, await service.getRooftopHealth(rooftopHealthMatch.rooftopId));
       }
 
       const rooftopMatch = matchPath(pathname, '/api/rooftops/:rooftopId');
       if (request.method === 'GET' && rooftopMatch) {
+        await requireRooftop(rooftopMatch.rooftopId);
         return sendJson(response, 200, await service.getRooftop(rooftopMatch.rooftopId));
       }
 
       const rooftopDashboardMatch = matchPath(pathname, '/api/rooftops/:rooftopId/dashboard');
       if (request.method === 'GET' && rooftopDashboardMatch) {
+        await requireRooftop(rooftopDashboardMatch.rooftopId);
         return sendJson(response, 200, await service.getRooftopDashboard(rooftopDashboardMatch.rooftopId));
       }
 
       const staleVehicleMatch = matchPath(pathname, '/api/rooftops/:rooftopId/stale-vehicles');
       if (request.method === 'GET' && staleVehicleMatch) {
+        await requireRooftop(staleVehicleMatch.rooftopId);
         return sendJson(response, 200, await service.listStaleVehicles(staleVehicleMatch.rooftopId));
       }
 
       if (request.method === 'GET' && pathname === '/api/listings') {
+        if (searchParams.get('rooftopId')) await requireRooftop(searchParams.get('rooftopId'));
         return sendJson(response, 200, await service.listListings({ rooftopId: searchParams.get('rooftopId') }));
       }
 
       const listingMatch = matchPath(pathname, '/api/listings/:listingId');
       if (request.method === 'GET' && listingMatch) {
-        return sendJson(response, 200, await service.getListing(listingMatch.listingId));
+        const listing = await service.getListing(listingMatch.listingId);
+        await requireRooftop(listing.rooftopId);
+        return sendJson(response, 200, listing);
       }
 
       const listingTransitionMatch = matchPath(pathname, '/api/listings/:listingId/transitions');
       if (request.method === 'POST' && listingTransitionMatch) {
         const body = await readJson(request);
+        const listing = await service.getListing(listingTransitionMatch.listingId);
+        await requireRooftop(listing.rooftopId, 'manager');
         return sendJson(
           response,
           200,
@@ -157,7 +294,25 @@ export function createHttpServer({ service = createDefaultService() } = {}) {
         );
       }
 
+      const listingDraftMatch = matchPath(pathname, '/api/listings/:listingId/draft');
+      if (request.method === 'PATCH' && listingDraftMatch) {
+        const listing = await service.getListing(listingDraftMatch.listingId);
+        const actor = await getActor();
+        await requireRooftop(listing.rooftopId, 'manager');
+        return sendJson(response, 200, await service.updateListingDraft(listing.id, await readJson(request), { actor: actor.id }));
+      }
+
+      const listingActivityMatch = matchPath(pathname, '/api/listings/:listingId/activities');
+      if (request.method === 'POST' && listingActivityMatch) {
+        const listing = await service.getListing(listingActivityMatch.listingId);
+        const actor = await getActor();
+        await requireRooftop(listing.rooftopId);
+        const body = await readJson(request);
+        return sendJson(response, 201, await service.recordListingActivity(listing.id, body.type, body.metadata, { actor: actor.id }));
+      }
+
       if (request.method === 'GET' && pathname === '/api/leads') {
+        if (searchParams.get('rooftopId')) await requireRooftop(searchParams.get('rooftopId'));
         return sendJson(
           response,
           200,
@@ -169,6 +324,7 @@ export function createHttpServer({ service = createDefaultService() } = {}) {
       }
 
       if (request.method === 'GET' && pathname === '/api/sync-runs') {
+        if (searchParams.get('rooftopId')) await requireRooftop(searchParams.get('rooftopId'));
         return sendJson(
           response,
           200,
@@ -181,37 +337,62 @@ export function createHttpServer({ service = createDefaultService() } = {}) {
       }
 
       if (request.method === 'POST' && pathname === '/api/leads') {
-        return sendJson(response, 201, await service.createLead(await readJson(request)));
+        const body = await readJson(request);
+        await requireRooftop(body.rooftopId, 'manager');
+        return sendJson(response, 201, await service.createLead(body));
       }
 
       const dealerMatch = matchPath(pathname, '/api/dealers/:dealerId');
       if (request.method === 'GET' && dealerMatch) {
+        await requireDealer(dealerMatch.dealerId);
         return sendJson(response, 200, await service.getDealer(dealerMatch.dealerId));
       }
 
       const inventorySourceMatch = matchPath(pathname, '/api/inventory-sources/:inventorySourceId');
       if (request.method === 'GET' && inventorySourceMatch) {
-        return sendJson(response, 200, await service.getInventorySource(inventorySourceMatch.inventorySourceId));
+        const source = await service.getInventorySource(inventorySourceMatch.inventorySourceId);
+        await requireRooftop(source.rooftopId);
+        return sendJson(response, 200, source);
       }
 
       const inventorySourceSyncMatch = matchPath(pathname, '/api/inventory-sources/:inventorySourceId/sync');
       if (request.method === 'POST' && inventorySourceSyncMatch) {
-        return sendJson(response, 200, await service.syncInventorySource(inventorySourceSyncMatch.inventorySourceId));
+        const source = await service.getInventorySource(inventorySourceSyncMatch.inventorySourceId);
+        await requireRooftop(source.rooftopId, 'manager');
+        return sendJson(response, 200, await service.syncInventorySource(source.id));
+      }
+
+      const inventorySourceCsvMatch = matchPath(pathname, '/api/inventory-sources/:inventorySourceId/csv');
+      if (request.method === 'POST' && inventorySourceCsvMatch) {
+        const source = await service.getInventorySource(inventorySourceCsvMatch.inventorySourceId);
+        await requireRooftop(source.rooftopId, 'manager');
+        const body = await readJson(request);
+        return sendJson(
+          response,
+          200,
+          await service.uploadCsvInventorySource(source.id, body.csvText, { fileName: body.fileName })
+        );
       }
 
       const syncRunMatch = matchPath(pathname, '/api/sync-runs/:syncRunId');
       if (request.method === 'GET' && syncRunMatch) {
-        return sendJson(response, 200, await service.getSyncRun(syncRunMatch.syncRunId));
+        const syncRun = await service.getSyncRun(syncRunMatch.syncRunId);
+        await requireRooftop(syncRun.rooftopId);
+        return sendJson(response, 200, syncRun);
       }
 
       const leadMatch = matchPath(pathname, '/api/leads/:leadId');
       if (request.method === 'GET' && leadMatch) {
-        return sendJson(response, 200, await service.getLead(leadMatch.leadId));
+        const lead = await service.getLead(leadMatch.leadId);
+        await requireRooftop(lead.rooftopId);
+        return sendJson(response, 200, lead);
       }
 
       const leadAssignMatch = matchPath(pathname, '/api/leads/:leadId/assign');
       if (request.method === 'PATCH' && leadAssignMatch) {
         const body = await readJson(request);
+        const lead = await service.getLead(leadAssignMatch.leadId);
+        await requireRooftop(lead.rooftopId, 'manager');
         return sendJson(
           response,
           200,
@@ -222,6 +403,8 @@ export function createHttpServer({ service = createDefaultService() } = {}) {
       const leadStatusMatch = matchPath(pathname, '/api/leads/:leadId/status');
       if (request.method === 'PATCH' && leadStatusMatch) {
         const body = await readJson(request);
+        const lead = await service.getLead(leadStatusMatch.leadId);
+        await requireRooftop(lead.rooftopId);
         return sendJson(response, 200, await service.updateLeadStatus(leadStatusMatch.leadId, body.status, body));
       }
 

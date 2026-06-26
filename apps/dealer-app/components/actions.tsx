@@ -9,6 +9,7 @@ import {
   createRooftop,
   isApiError,
   syncInventorySource,
+  uploadCsvInventorySource,
   transitionListing,
   updateLeadStatus
 } from '../lib/api';
@@ -131,34 +132,65 @@ export function CreateRooftopForm({ dealerId }: { dealerId: string }) {
 export function CreateInventorySourceForm({ rooftopId }: { rooftopId: string }) {
   const router = useRouter();
   const state = useActionState();
+  const [sourceType, setSourceType] = useState<'website_inventory_url' | 'csv_upload' | 'xml_feed_url'>('website_inventory_url');
 
   return (
     <form
       className="stack"
       action={async (formData) => {
         await state.run(async () => {
-          await createInventorySource({
+          const source = await createInventorySource({
             rooftopId,
             name: String(formData.get('name') ?? '').trim(),
-            type: 'xml_feed_url',
-            format: 'generic_xml_v1',
-            sourceUrl: String(formData.get('sourceUrl') ?? '').trim()
+            type: sourceType,
+            format:
+              sourceType === 'website_inventory_url'
+                ? 'firecrawl_structured_v1'
+                : sourceType === 'csv_upload'
+                  ? 'generic_csv_v1'
+                  : 'generic_xml_v1',
+            sourceUrl: sourceType === 'csv_upload' ? null : String(formData.get('sourceUrl') ?? '').trim()
           });
+          if (sourceType === 'csv_upload') {
+            const file = formData.get('csvFile');
+            if (!(file instanceof File) || !file.size) throw new Error('Choose a CSV file to upload');
+            await uploadCsvInventorySource(source.id, await file.text(), file.name);
+          }
           router.refresh();
-          return 'Inventory source saved.';
+          return sourceType === 'csv_upload' ? 'CSV inventory source saved and uploaded.' : 'Inventory source saved.';
         });
       }}
     >
       <label className="field">
         <span>Source name</span>
-        <input name="name" placeholder="Primary XML Feed" required />
+        <input name="name" placeholder="Primary inventory source" required />
       </label>
       <label className="field">
-        <span>Feed URL</span>
-        <input name="sourceUrl" type="url" placeholder="https://dealer.example.com/feed.xml" required />
+        <span>Import method</span>
+        <select value={sourceType} onChange={(event) => setSourceType(event.target.value as typeof sourceType)}>
+          <option value="website_inventory_url">Public dealer inventory URL</option>
+          <option value="csv_upload">CSV upload fallback</option>
+          <option value="xml_feed_url">XML feed URL</option>
+        </select>
       </label>
+      {sourceType === 'csv_upload' ? (
+        <label className="field">
+          <span>Inventory CSV</span>
+          <input name="csvFile" type="file" accept=".csv,text/csv" required />
+        </label>
+      ) : (
+        <label className="field">
+          <span>{sourceType === 'xml_feed_url' ? 'Feed URL' : 'Inventory page URL'}</span>
+          <input
+            name="sourceUrl"
+            type="url"
+            placeholder={sourceType === 'xml_feed_url' ? 'https://dealer.example.com/feed.xml' : 'https://dealer.example.com/inventory'}
+            required
+          />
+        </label>
+      )}
       <button className="button button-primary" disabled={state.pending}>
-        {state.pending ? 'Saving...' : 'Save XML feed'}
+        {state.pending ? 'Saving...' : 'Save inventory source'}
       </button>
       {state.message ? <p className="success-copy">{state.message}</p> : null}
       {state.error ? <p className="error-copy">{state.error}</p> : null}

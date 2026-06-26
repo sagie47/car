@@ -4,6 +4,11 @@ export class InMemoryStore extends LotPilotStore {
   constructor() {
     super();
     this.dealers = new Map();
+    this.userProfiles = new Map();
+    this.userIdsByEmail = new Map();
+    this.memberships = new Map();
+    this.rooftopAccess = new Map();
+    this.invitations = new Map();
     this.rooftops = new Map();
     this.inventorySources = new Map();
     this.syncRuns = new Map();
@@ -12,6 +17,10 @@ export class InMemoryStore extends LotPilotStore {
     this.listings = new Map();
     this.vehicleListingIds = new Map();
     this.leads = new Map();
+    this.notificationRecipients = new Map();
+    this.inboundEvents = new Map();
+    this.inboundEventsByExternalId = new Map();
+    this.notificationDeliveries = new Map();
   }
 
   async saveDealer(dealer) {
@@ -25,6 +34,62 @@ export class InMemoryStore extends LotPilotStore {
 
   async getDealer(dealerId) {
     return this.dealers.get(dealerId) ?? null;
+  }
+
+  async saveUserProfile(user) {
+    this.userProfiles.set(user.id, user);
+    this.userIdsByEmail.set(user.email.toLowerCase(), user.id);
+    return user;
+  }
+
+  async getUserProfile(userId) {
+    return this.userProfiles.get(userId) ?? null;
+  }
+
+  async getUserProfileByEmail(email) {
+    const userId = this.userIdsByEmail.get(email.toLowerCase());
+    return userId ? this.userProfiles.get(userId) ?? null : null;
+  }
+
+  async saveMembership(membership) {
+    this.memberships.set(`${membership.dealerId}:${membership.userId}`, membership);
+    return membership;
+  }
+
+  async getMembership({ dealerId, userId }) {
+    return this.memberships.get(`${dealerId}:${userId}`) ?? null;
+  }
+
+  async listMemberships({ dealerId, userId } = {}) {
+    return [...this.memberships.values()].filter((membership) =>
+      (!dealerId || membership.dealerId === dealerId) && (!userId || membership.userId === userId)
+    );
+  }
+
+  async saveRooftopAccess(access) {
+    this.rooftopAccess.set(`${access.rooftopId}:${access.userId}`, access);
+    return access;
+  }
+
+  async listRooftopAccess({ rooftopId, userId } = {}) {
+    return [...this.rooftopAccess.values()].filter((access) =>
+      (!rooftopId || access.rooftopId === rooftopId) && (!userId || access.userId === userId)
+    );
+  }
+
+  async saveInvitation(invitation) {
+    this.invitations.set(invitation.id, invitation);
+    return invitation;
+  }
+
+  async getInvitation(invitationId) {
+    return this.invitations.get(invitationId) ?? null;
+  }
+
+  async listInvitations({ email, status } = {}) {
+    return [...this.invitations.values()].filter((invitation) =>
+      (!email || invitation.email === email.toLowerCase()) && (!status || invitation.status === status)
+    );
   }
 
   async saveRooftop(rooftop) {
@@ -147,5 +212,40 @@ export class InMemoryStore extends LotPilotStore {
 
       return true;
     });
+  }
+
+  async saveNotificationRecipient(recipient) {
+    this.notificationRecipients.set(recipient.id, recipient);
+    return recipient;
+  }
+
+  async listNotificationRecipients({ rooftopId, isActive } = {}) {
+    return [...this.notificationRecipients.values()].filter((recipient) => {
+      if (rooftopId && recipient.rooftopId !== rooftopId) return false;
+      if (isActive !== undefined && recipient.isActive !== isActive) return false;
+      return true;
+    });
+  }
+
+  async saveInboundEvent(event) {
+    this.inboundEvents.set(event.id, event);
+    this.inboundEventsByExternalId.set(event.externalId, event.id);
+    return event;
+  }
+
+  async getInboundEventByExternalId(externalId) {
+    const eventId = this.inboundEventsByExternalId.get(externalId);
+    return eventId ? this.inboundEvents.get(eventId) ?? null : null;
+  }
+
+  async saveNotificationDelivery(delivery) {
+    this.notificationDeliveries.set(delivery.id, delivery);
+    return delivery;
+  }
+
+  async listNotificationDeliveries({ leadId, status } = {}) {
+    return [...this.notificationDeliveries.values()].filter((delivery) =>
+      (!leadId || delivery.leadId === leadId) && (!status || delivery.status === status)
+    );
   }
 }

@@ -1,4 +1,7 @@
 import { fetchXmlFeed, parseGenericXmlFeed } from '../adapters/generic-xml-feed.js';
+import { parseCsvInventory } from '../adapters/csv-inventory.js';
+import { createFirecrawlInventoryAdapter } from '../adapters/firecrawl-inventory.js';
+import { createNotificationAdapter } from '../adapters/notification-delivery.js';
 import {
   buildSyncRunRecord,
   createInventorySourceRecord,
@@ -8,7 +11,7 @@ import {
 } from '../domain/inventory-source.js';
 import { evaluateVehicleEligibility, isVehicleStale } from '../domain/eligibility.js';
 import { calculateInventoryHealth } from '../domain/health-score.js';
-import { buildListingDraft } from '../domain/listing-draft.js';
+import { buildListingDraft, updateListingDraftOverrides } from '../domain/listing-draft.js';
 import {
   canTransitionListingState,
   createInitialListing,
@@ -34,10 +37,16 @@ function defaultFeedAdapter() {
   };
 }
 
+function defaultInventoryAdapter() {
+  return createFirecrawlInventoryAdapter();
+}
+
 export class LotPilotService {
-  constructor({ store, feedAdapter } = {}) {
+  constructor({ store, feedAdapter, inventoryAdapter, notificationAdapter } = {}) {
     this.store = store ?? new InMemoryStore();
     this.feedAdapter = feedAdapter ?? defaultFeedAdapter();
+    this.inventoryAdapter = inventoryAdapter ?? defaultInventoryAdapter();
+    this.notificationAdapter = notificationAdapter ?? createNotificationAdapter();
   }
 
   async createDealer(payload) {
@@ -425,7 +434,8 @@ export class LotPilotService {
         draft: buildListingDraft(vehicle, {
           tonePreset: listing.draft?.tonePreset ?? tonePreset,
           rules,
-          rooftop
+          rooftop,
+          overrides: listing.draft?.overrides
         }),
         updatedAt: nowIso()
       };
@@ -515,14 +525,6 @@ export class LotPilotService {
       throw new Error(`Rooftop ${inventorySource.rooftopId} was not found`);
     }
 
-    if (inventorySource.type !== INVENTORY_SOURCE_TYPES.XML_FEED_URL) {
-      throw new Error(`Unsupported inventory source type '${inventorySource.type}'`);
-    }
-
-    if (inventorySource.format !== INVENTORY_SOURCE_FORMATS.GENERIC_XML_V1) {
-      throw new Error(`Unsupported inventory source format '${inventorySource.format}'`);
-    }
-
     let syncRun = buildSyncRunRecord({
       rooftop,
       inventorySourceId: inventorySource.id,
@@ -534,8 +536,29 @@ export class LotPilotService {
     await this.store.saveSyncRun(syncRun);
 
     try {
-      const xml = await this.feedAdapter.fetchXmlFeed(inventorySource.sourceUrl);
-      const vehicles = this.feedAdapter.parseGenericXmlFeed(xml);
+      let vehicles;
+      let extraction = null;
+
+      if (
+        inventorySource.type === INVENTORY_SOURCE_TYPES.XML_FEED_URL &&
+        inventorySource.format === INVENTORY_SOURCE_FORMATS.GENERIC_XML_V1
+      ) {
+        const xml = await this.feedAdapter.fetchXmlFeed(inventorySource.sourceUrl);
+        vehicles = this.feedAdapter.parseGenericXmlFeed(xml);
+      } else if (
+        inventorySource.type === INVENTORY_SOURCE_TYPES.WEBSITE_INVENTORY_URL &&
+        inventorySource.format === INVENTORY_SOURCE_FORMATS.FIRECRAWL_STRUCTURED_V1
+      ) {
+        extraction = await this.inventoryAdapter.importInventory(inventorySource.sourceUrl);
+        vehicles = extraction.vehicles;
+      } else if (
+        inventorySource.type === INVENTORY_SOURCE_TYPES.CSV_UPLOAD &&
+        inventorySource.format === INVENTORY_SOURCE_FORMATS.GENERIC_CSV_V1
+      ) {
+        vehicles = parseCsvInventory(inventorySource.sourceConfig?.csvText ?? '');
+      } else {
+        throw new Error(`Unsupported inventory source '${inventorySource.type}/${inventorySource.format}'`);
+      }
 
       if (!vehicles.length) {
         throw new Error('Feed XML does not contain any usable vehicle records');
@@ -558,6 +581,15 @@ export class LotPilotService {
 
       const updatedInventorySource = await this.store.saveInventorySource({
         ...inventorySource,
+        sourceConfig: {
+          ...(inventorySource.sourceConfig ?? {}),
+          lastExtraction: extraction
+            ? {
+                importedAt: syncRun.completedAt,
+                detailPageCount: extraction.raw.detailPageCount
+              }
+            : inventorySource.sourceConfig?.lastExtraction ?? null
+        },
         lastSyncedAt: syncRun.completedAt,
         lastSyncStatus: 'completed',
         updatedAt: nowIso()
@@ -582,6 +614,230 @@ export class LotPilotService {
     }
   }
 
+  async uploadCsvInventorySource(inventorySourceId, csvText, { fileName = 'inventory.csv' } = {}) {
+    const inventorySource = await this.getInventorySource(inventorySourceId);
+    if (inventorySource.type !== INVENTORY_SOURCE_TYPES.CSV_UPLOAD) {
+      throw new Error('CSV content can only be uploaded to csv_upload sources');
+    }
+    if (typeof csvText !== 'string' || Buffer.byteLength(csvText, 'utf8') > 5 * 1024 * 1024) {
+      throw new Error('CSV upload must be text smaller than 5 MB');
+    }
+
+    return this.store.saveInventorySource({
+      ...inventorySource,
+      sourceConfig: {
+        ...(inventorySource.sourceConfig ?? {}),
+        csvText,
+        fileName,
+        uploadedAt: nowIso()
+      },
+      updatedAt: nowIso()
+    });
+  }
+
+  async updateListingDraft(listingId, updates, { actor = 'system' } = {}) {
+    const listing = await this.getListing(listingId);
+    const allowed = {};
+    if (typeof updates.title === 'string') allowed.title = updates.title.trim();
+    if (updates.price === null || Number.isFinite(updates.price)) allowed.price = updates.price;
+    if (typeof updates.description === 'string') allowed.description = updates.description.trim();
+    if (Array.isArray(updates.photoUrls)) allowed.photoUrls = updates.photoUrls.filter((url) => typeof url === 'string');
+
+    const updatedListing = {
+      ...listing,
+      draft: updateListingDraftOverrides(listing.draft, allowed, { actor }),
+      updatedAt: nowIso(),
+      events: [
+        ...listing.events,
+        {
+          id: createId('listing_event'),
+          fromState: listing.state,
+          toState: listing.state,
+          actor,
+          reason: 'Dealer edited Marketplace draft',
+          metadata: { fields: Object.keys(allowed) },
+          eventType: 'draft_edited',
+          createdAt: nowIso()
+        }
+      ]
+    };
+
+    return this.store.saveListing(updatedListing);
+  }
+
+  async recordListingActivity(listingId, type, metadata = {}, { actor = 'system' } = {}) {
+    if (!['copied', 'exported'].includes(type)) {
+      throw new Error(`Unsupported listing activity '${type}'`);
+    }
+    const listing = await this.getListing(listingId);
+    return this.store.saveListing({
+      ...listing,
+      updatedAt: nowIso(),
+      events: [
+        ...listing.events,
+        {
+          id: createId('listing_event'),
+          fromState: listing.state,
+          toState: listing.state,
+          actor,
+          reason: `Listing ${type}`,
+          metadata,
+          eventType: type,
+          createdAt: nowIso()
+        }
+      ]
+    });
+  }
+
+  async upsertUserProfile(identity) {
+    if (!identity?.id || !identity?.email) throw new Error('User identity requires id and email');
+    const existing = await this.store.getUserProfile(identity.id);
+    return this.store.saveUserProfile({
+      id: identity.id,
+      email: identity.email.toLowerCase(),
+      displayName: identity.displayName ?? existing?.displayName ?? null,
+      phone: identity.phone ?? existing?.phone ?? null,
+      createdAt: existing?.createdAt ?? nowIso(),
+      updatedAt: nowIso()
+    });
+  }
+
+  async saveMembership({ dealerId, userId, role }) {
+    if (!['owner', 'manager', 'salesperson'].includes(role)) throw new Error(`Invalid membership role '${role}'`);
+    return this.store.saveMembership({
+      id: createId('membership'),
+      dealerId,
+      userId,
+      role,
+      createdAt: nowIso()
+    });
+  }
+
+  async grantRooftopAccess({ rooftopId, userId }) {
+    return this.store.saveRooftopAccess({ id: createId('rooftop_access'), rooftopId, userId, createdAt: nowIso() });
+  }
+
+  async createInvitation({ dealerId, email, role, rooftopIds = [], invitedById = null }) {
+    if (!['owner', 'manager', 'salesperson'].includes(role)) throw new Error(`Invalid invitation role '${role}'`);
+    return this.store.saveInvitation({
+      id: createId('invitation'),
+      dealerId,
+      email: email.toLowerCase(),
+      role,
+      rooftopIds,
+      status: 'pending',
+      invitedById,
+      createdAt: nowIso(),
+      acceptedAt: null
+    });
+  }
+
+  async acceptPendingInvitations(user) {
+    const invitations = await this.store.listInvitations({ email: user.email, status: 'pending' });
+    for (const invitation of invitations) {
+      await this.saveMembership({ dealerId: invitation.dealerId, userId: user.id, role: invitation.role });
+      for (const rooftopId of invitation.rooftopIds) {
+        await this.grantRooftopAccess({ rooftopId, userId: user.id });
+      }
+      await this.store.saveInvitation({ ...invitation, status: 'accepted', acceptedAt: nowIso() });
+    }
+    return invitations;
+  }
+
+  async createNotificationRecipient({ rooftopId, userId = null, channel, destination }) {
+    if (!['sms', 'email'].includes(channel)) throw new Error(`Invalid notification channel '${channel}'`);
+    if (!destination) throw new Error('Notification destination is required');
+    return this.store.saveNotificationRecipient({
+      id: createId('notification_recipient'),
+      rooftopId,
+      userId,
+      channel,
+      destination: destination.trim(),
+      isActive: true,
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    });
+  }
+
+  async deliverLeadNotifications(lead) {
+    const recipients = await this.store.listNotificationRecipients({ rooftopId: lead.rooftopId, isActive: true });
+    const vehicle = await this.getVehicle(lead.vehicleId);
+    const subject = `New lead: ${[vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ')}`;
+    const text = [
+      subject,
+      lead.contactName ? `Contact: ${lead.contactName}` : null,
+      lead.contactEmail ? `Email: ${lead.contactEmail}` : null,
+      lead.contactPhone ? `Phone: ${lead.contactPhone}` : null,
+      lead.sourceMessage ? `Message: ${lead.sourceMessage}` : null
+    ].filter(Boolean).join('\n');
+
+    return Promise.all(recipients.map(async (recipient) => {
+      let delivery = {
+        id: createId('notification_delivery'),
+        leadId: lead.id,
+        recipientId: recipient.id,
+        channel: recipient.channel,
+        status: 'queued',
+        attempts: 0,
+        providerId: null,
+        lastError: null,
+        createdAt: nowIso(),
+        updatedAt: nowIso()
+      };
+      await this.store.saveNotificationDelivery(delivery);
+      try {
+        const result = await this.notificationAdapter.send({
+          channel: recipient.channel,
+          destination: recipient.destination,
+          subject,
+          text
+        });
+        delivery = { ...delivery, status: 'sent', attempts: 1, providerId: result.providerId, updatedAt: nowIso() };
+      } catch (error) {
+        delivery = { ...delivery, status: 'failed', attempts: 1, lastError: error.message, updatedAt: nowIso() };
+      }
+      return this.store.saveNotificationDelivery(delivery);
+    }));
+  }
+
+  async ingestInboundLead({ rooftopId, vehicleId, externalId, payload }) {
+    const existing = await this.store.getInboundEventByExternalId(externalId);
+    if (existing) return { duplicate: true, lead: existing.leadId ? await this.getLead(existing.leadId) : null };
+
+    const lead = await this.createLead({
+      rooftopId,
+      vehicleId,
+      sourceChannel: 'email',
+      sourceSubchannel: 'forwarded_notification',
+      contactName: payload.contactName,
+      contactEmail: payload.contactEmail,
+      contactPhone: payload.contactPhone,
+      sourceMessage: payload.text,
+      externalId
+    });
+    await this.store.saveInboundEvent({
+      id: createId('inbound_event'),
+      provider: 'resend',
+      externalId,
+      rooftopId,
+      leadId: lead.id,
+      payload,
+      receivedAt: nowIso()
+    });
+    return { duplicate: false, lead };
+  }
+
+  async findInboundLeadVehicle(rooftopId, text) {
+    const vehicles = await this.listVehicles({ rooftopId });
+    const normalizedText = String(text ?? '').toLowerCase();
+    return (
+      vehicles.find((vehicle) => vehicle.vdpUrl && normalizedText.includes(vehicle.vdpUrl.toLowerCase())) ??
+      vehicles.find((vehicle) => vehicle.vin && normalizedText.includes(vehicle.vin.toLowerCase())) ??
+      vehicles.find((vehicle) => vehicle.stockNumber && normalizedText.includes(vehicle.stockNumber.toLowerCase())) ??
+      null
+    );
+  }
+
   async generateListingDraft(vehicleId, options = {}) {
     const vehicle = await this.getVehicle(vehicleId);
     const rooftop = await this.store.getRooftop(vehicle.rooftopId);
@@ -589,7 +845,8 @@ export class LotPilotService {
     const draft = buildListingDraft(vehicle, {
       ...options,
       rules: rooftop?.rules,
-      rooftop
+      rooftop,
+      overrides: listing?.draft?.overrides
     });
 
     if (!listing) {
@@ -623,6 +880,7 @@ export class LotPilotService {
     const vehicle = await this.getVehicle(payload.vehicleId);
     const lead = createLeadRecord(payload, vehicle);
     await this.store.saveLead(lead);
+    await this.deliverLeadNotifications(lead);
     return lead;
   }
 

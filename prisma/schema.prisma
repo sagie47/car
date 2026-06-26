@@ -13,6 +13,61 @@ model Dealer {
   rooftops  Rooftop[]
   syncRuns  InventorySyncRun[]
   vehicles  Vehicle[]
+  memberships DealerMembership[]
+  invitations DealerInvitation[]
+}
+
+model UserProfile {
+  id             String             @id
+  email          String             @unique
+  displayName    String?
+  phone          String?
+  createdAt      DateTime
+  updatedAt      DateTime
+  memberships    DealerMembership[]
+  rooftopAccess  RooftopAccess[]
+  recipients     NotificationRecipient[]
+}
+
+model DealerMembership {
+  id        String      @id
+  dealerId  String
+  userId    String
+  role      String
+  createdAt DateTime
+  dealer    Dealer      @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+  user      UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([dealerId, userId])
+  @@index([userId])
+}
+
+model RooftopAccess {
+  id        String      @id
+  rooftopId String
+  userId    String
+  createdAt DateTime
+  rooftop   Rooftop     @relation(fields: [rooftopId], references: [id], onDelete: Cascade)
+  user      UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([rooftopId, userId])
+  @@index([userId])
+}
+
+model DealerInvitation {
+  id          String   @id
+  dealerId    String
+  email       String
+  role        String
+  rooftopIds  Json
+  status      String
+  invitedById String?
+  createdAt   DateTime
+  acceptedAt  DateTime?
+  dealer      Dealer   @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+
+  @@index([dealerId])
+  @@index([email])
 }
 
 model Rooftop {
@@ -32,6 +87,8 @@ model Rooftop {
   vehicles       Vehicle[]
   listings       Listing[]
   leads          Lead[]
+  accessGrants   RooftopAccess[]
+  recipients     NotificationRecipient[]
 
   @@index([dealerId])
 }
@@ -42,7 +99,8 @@ model InventorySource {
   name           String
   type           String
   format         String
-  sourceUrl      String
+  sourceUrl      String?
+  sourceConfig   Json
   isActive       Boolean
   lastSyncedAt   DateTime?
   lastSyncStatus String?
@@ -164,6 +222,7 @@ model ListingEvent {
   actor     String
   reason    String?
   metadata  Json
+  eventType String   @default("state_transition")
   createdAt DateTime
   listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
 
@@ -185,9 +244,16 @@ model Lead {
   sold              Boolean
   attributedValue   Int?
   suggestedResponse String
+  contactName       String?
+  contactEmail      String?
+  contactPhone      String?
+  sourceMessage     String?
+  externalId        String?     @unique
   vehicle           Vehicle     @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
   rooftop           Rooftop     @relation(fields: [rooftopId], references: [id], onDelete: Cascade)
   events            LeadEvent[]
+  inboundEvents     InboundEvent[]
+  deliveries        NotificationDelivery[]
 
   @@index([rooftopId])
   @@index([status])
@@ -203,4 +269,52 @@ model LeadEvent {
   lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@index([leadId, createdAt])
+}
+
+model NotificationRecipient {
+  id        String      @id
+  rooftopId String
+  userId    String?
+  channel   String
+  destination String
+  isActive  Boolean
+  createdAt DateTime
+  updatedAt DateTime
+  rooftop   Rooftop     @relation(fields: [rooftopId], references: [id], onDelete: Cascade)
+  user      UserProfile? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  deliveries NotificationDelivery[]
+
+  @@unique([rooftopId, channel, destination])
+  @@index([rooftopId])
+}
+
+model InboundEvent {
+  id          String   @id
+  provider    String
+  externalId  String   @unique
+  rooftopId   String
+  leadId      String?
+  payload     Json
+  receivedAt  DateTime
+  lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([rooftopId, receivedAt])
+}
+
+model NotificationDelivery {
+  id          String                @id
+  leadId      String
+  recipientId String
+  channel     String
+  status      String
+  attempts    Int
+  providerId  String?
+  lastError   String?
+  createdAt   DateTime
+  updatedAt   DateTime
+  lead        Lead                  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  recipient   NotificationRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@index([status])
 }
