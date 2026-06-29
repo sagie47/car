@@ -14,13 +14,13 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
     return <EmptyState title="Listing not found" body="The requested listing could not be loaded." />;
   }
 
-  const vehicle = await getVehicle(listing.vehicleId);
+  const vehicle = await getVehicle(listing.vehicleId).catch(() => null);
 
   return (
     <div className="stack page-stack">
       <PageHeader
-        title={listing.draft.title || vehicleLabel(vehicle)}
-        subtitle={`Listing ${listing.id} • vehicle ${vehicle.stockNumber || vehicle.vin}`}
+        title={listing.draft.title || (vehicle ? vehicleLabel(vehicle) : listing.vehicleId)}
+        subtitle={`Listing ${listing.id} • vehicle ${vehicle?.stockNumber || vehicle?.vin || listing.vehicleId}`}
       />
 
       <div className="content-grid">

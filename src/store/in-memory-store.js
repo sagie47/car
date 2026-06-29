@@ -16,6 +16,9 @@ export class InMemoryStore extends LotPilotStore {
     this.vehicleKeys = new Map();
     this.listings = new Map();
     this.vehicleListingIds = new Map();
+    this.postingAccounts = new Map();
+    this.postingJobs = new Map();
+    this.postingAttempts = new Map();
     this.leads = new Map();
     this.notificationRecipients = new Map();
     this.inboundEvents = new Map();
@@ -190,6 +193,55 @@ export class InMemoryStore extends LotPilotStore {
     return rooftopId ? listings.filter((listing) => listing.rooftopId === rooftopId) : listings;
   }
 
+  async savePostingAccount(account) {
+    this.postingAccounts.set(account.id, account);
+    return account;
+  }
+
+  async getPostingAccount(accountId) {
+    return this.postingAccounts.get(accountId) ?? null;
+  }
+
+  async listPostingAccounts({ rooftopId, status } = {}) {
+    return [...this.postingAccounts.values()].filter((account) =>
+      (!rooftopId || account.rooftopId === rooftopId) && (!status || account.status === status)
+    );
+  }
+
+  async savePostingJob(job) {
+    this.postingJobs.set(job.id, job);
+    return job;
+  }
+
+  async getPostingJob(jobId) {
+    return this.postingJobs.get(jobId) ?? null;
+  }
+
+  async listPostingJobs({ rooftopId, listingId, status, active } = {}) {
+    const activeStatuses = new Set(['pending', 'blocked', 'claimed', 'in_progress', 'needs_manual_review']);
+    return [...this.postingJobs.values()]
+      .filter((job) =>
+        (!rooftopId || job.rooftopId === rooftopId) &&
+        (!listingId || job.listingId === listingId) &&
+        (!status || job.status === status) &&
+        (active === undefined || activeStatuses.has(job.status) === active)
+      )
+      .sort((left, right) =>
+        left.scheduledFor.localeCompare(right.scheduledFor) || right.priority - left.priority
+      );
+  }
+
+  async savePostingAttempt(attempt) {
+    this.postingAttempts.set(attempt.id, attempt);
+    return attempt;
+  }
+
+  async listPostingAttempts({ jobId } = {}) {
+    return [...this.postingAttempts.values()]
+      .filter((attempt) => !jobId || attempt.jobId === jobId)
+      .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+  }
+
   async saveLead(lead) {
     this.leads.set(lead.id, lead);
     return lead;
@@ -217,6 +269,10 @@ export class InMemoryStore extends LotPilotStore {
   async saveNotificationRecipient(recipient) {
     this.notificationRecipients.set(recipient.id, recipient);
     return recipient;
+  }
+
+  async getNotificationRecipient(recipientId) {
+    return this.notificationRecipients.get(recipientId) ?? null;
   }
 
   async listNotificationRecipients({ rooftopId, isActive } = {}) {

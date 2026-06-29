@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: '/validation', label: 'Validation' },
   { href: '/vehicles', label: 'Vehicles' },
   { href: '/listings', label: 'Listings' },
+  { href: '/posting', label: 'Posting' },
   { href: '/stale', label: 'Stale Queue' },
   { href: '/leads', label: 'Leads' },
   { href: '/reports', label: 'Reports' },
@@ -27,7 +28,7 @@ export function AppShell({ children }: PropsWithChildren) {
           <p className="eyebrow">LotPilot Beta</p>
           <h1>Dealer Console</h1>
           <p className="muted">
-            Marketplace-first inventory reliability for one dealer and one rooftop at a time.
+            Marketplace-first inventory reliability from one inventory URL.
           </p>
         </div>
         <nav className="nav-stack">

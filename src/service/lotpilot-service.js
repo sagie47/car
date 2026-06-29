@@ -17,7 +17,7 @@ import {
   createInitialListing,
   transitionListingState
 } from '../domain/listing-state-machine.js';
-import { assignLeadRecord, createLeadRecord, updateLeadStatusRecord } from '../domain/lead.js';
+import { appendLeadEvent, assignLeadRecord, createLeadRecord, updateLeadStatusRecord } from '../domain/lead.js';
 import { normalizeIncomingVehicle } from '../domain/vehicle.js';
 import { createId, nowIso, stableHash } from '../lib/utils.js';
 import { InMemoryStore } from '../store/in-memory-store.js';
@@ -39,6 +39,175 @@ function defaultFeedAdapter() {
 
 function defaultInventoryAdapter() {
   return createFirecrawlInventoryAdapter();
+}
+
+const DEFAULT_NOTIFICATION_RULES = {
+  sendWindow: 'always',
+  timezone: 'America/Vancouver',
+  businessHours: {
+    days: [1, 2, 3, 4, 5],
+    start: '09:00',
+    end: '18:00'
+  },
+  fallback: true
+};
+
+const ACTIVE_POSTING_JOB_STATUSES = new Set(['pending', 'blocked', 'claimed', 'in_progress', 'needs_manual_review']);
+const POSTING_ACTION_STATES = {
+  publish: {
+    queued: 'queued_for_publish',
+    inProgress: 'publish_in_progress',
+    completed: 'published',
+    failed: 'publish_failed'
+  },
+  update: {
+    queued: 'queued_for_update',
+    inProgress: 'update_in_progress',
+    completed: 'updated',
+    failed: 'needs_manual_review'
+  },
+  remove: {
+    queued: 'queued_for_remove',
+    inProgress: 'remove_in_progress',
+    completed: 'removed',
+    failed: 'removal_failed'
+  }
+};
+
+function defaultPostingAccount(rooftopId) {
+  const now = nowIso();
+  return {
+    id: createId('posting_account'),
+    rooftopId,
+    platform: 'facebook_marketplace',
+    label: 'Default Facebook Marketplace account',
+    status: 'active',
+    dailyCapacity: 25,
+    spacingMinutes: 20,
+    autoSubmitEnabled: true,
+    settings: {
+      runner: 'chrome_extension',
+      target: 'facebook_marketplace_vehicle'
+    },
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function vehicleLabel(vehicle) {
+  return [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(' ') || vehicle.vin || vehicle.stockNumber || vehicle.id;
+}
+
+function blockedPostingChecks({ listing, vehicle, rooftop }) {
+  const minimumPhotos = rooftop.rules?.minimumPhotos ?? defaultRules().minimumPhotos;
+  const checks = [
+    { key: 'has_draft', ok: Boolean(listing.draft?.marketplacePost), message: 'Marketplace draft is required.' },
+    { key: 'has_year', ok: Boolean(vehicle.year), message: 'Vehicle year is required.' },
+    { key: 'has_make', ok: Boolean(vehicle.make), message: 'Vehicle make is required.' },
+    { key: 'has_model', ok: Boolean(vehicle.model), message: 'Vehicle model is required.' },
+    { key: 'has_price', ok: Number.isFinite(vehicle.price), message: 'Vehicle price is required.' },
+    { key: 'has_mileage', ok: Number.isFinite(vehicle.mileage), message: 'Vehicle mileage is required.' },
+    { key: 'has_photos', ok: (vehicle.photoUrls ?? []).length >= minimumPhotos, message: `At least ${minimumPhotos} photos are required.` }
+  ];
+  return checks;
+}
+
+function isUnavailableStatus(status) {
+  return ['sold', 'reserved', 'wholesale', 'in_transit'].includes(String(status ?? '').toLowerCase());
+}
+
+function postingActionFor(listing, vehicle) {
+  if (isUnavailableStatus(vehicle.status) || listing.state === 'queued_for_remove' || listing.state === 'removal_failed') {
+    return 'remove';
+  }
+  if (['published', 'updated', 'queued_for_update', 'update_in_progress'].includes(listing.state)) {
+    return 'update';
+  }
+  if (['draft_created', 'queued_for_publish', 'publish_failed', 'needs_manual_review'].includes(listing.state)) {
+    return 'publish';
+  }
+  return null;
+}
+
+function priorityForPostingJob(action, vehicle) {
+  if (action === 'remove') return 100;
+  if (vehicle.isStale) return 80;
+  if (action === 'publish') return 60;
+  return 50;
+}
+
+function normalizeNotificationRules(rules = {}) {
+  const sendWindow = rules.sendWindow === 'business_hours' ? 'business_hours' : 'always';
+  const businessHours = {
+    days: Array.isArray(rules.businessHours?.days)
+      ? rules.businessHours.days.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+      : DEFAULT_NOTIFICATION_RULES.businessHours.days,
+    start: /^\d{2}:\d{2}$/.test(rules.businessHours?.start ?? '') ? rules.businessHours.start : DEFAULT_NOTIFICATION_RULES.businessHours.start,
+    end: /^\d{2}:\d{2}$/.test(rules.businessHours?.end ?? '') ? rules.businessHours.end : DEFAULT_NOTIFICATION_RULES.businessHours.end
+  };
+  return {
+    sendWindow,
+    timezone: typeof rules.timezone === 'string' && rules.timezone.trim() ? rules.timezone.trim() : DEFAULT_NOTIFICATION_RULES.timezone,
+    businessHours,
+    fallback: rules.fallback === undefined ? true : Boolean(rules.fallback)
+  };
+}
+
+function minutesFromClock(value) {
+  const [hours, minutes] = String(value).split(':').map(Number);
+  return hours * 60 + minutes;
+}
+
+function localTimeParts(date, timezone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value;
+  const dayByName = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return {
+    day: dayByName[get('weekday')] ?? 0,
+    minutes: Number(get('hour')) * 60 + Number(get('minute'))
+  };
+}
+
+function isRecipientOpen(recipient, now = new Date()) {
+  const rules = normalizeNotificationRules(recipient.rules);
+  if (rules.sendWindow === 'always') return true;
+
+  const local = localTimeParts(now, rules.timezone);
+  const start = minutesFromClock(rules.businessHours.start);
+  const end = minutesFromClock(rules.businessHours.end);
+  const insideDay = rules.businessHours.days.includes(local.day);
+  const insideTime = start <= end
+    ? local.minutes >= start && local.minutes <= end
+    : local.minutes >= start || local.minutes <= end;
+  return insideDay && insideTime;
+}
+
+function selectNotificationRecipients(recipients, now = new Date()) {
+  const openRecipients = recipients.filter((recipient) => isRecipientOpen(recipient, now));
+  if (openRecipients.length) return openRecipients;
+  return recipients.filter((recipient) => normalizeNotificationRules(recipient.rules).fallback);
+}
+
+function titleCaseSegment(segment) {
+  return segment
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+    .trim();
+}
+
+function inferDealerNameFromUrl(inventoryUrl) {
+  const host = new URL(inventoryUrl).hostname.replace(/^www\./, '');
+  const main = host.split('.')[0] || 'Imported Dealer';
+  const tokenized = main
+    .replace(/(auto|centre|center|motors|motor|cars|car|dealer|sales|group|imports|trucks|truck)/gi, ' $1 ')
+    .replace(/\s+/g, ' ');
+  return titleCaseSegment(tokenized) || 'Imported Dealer';
 }
 
 export class LotPilotService {
@@ -134,6 +303,46 @@ export class LotPilotService {
     return this.store.saveInventorySource(inventorySource);
   }
 
+  async setupFromInventoryUrl({ inventoryUrl }) {
+    if (!inventoryUrl) throw new Error('inventoryUrl is required');
+    const inferredName = inferDealerNameFromUrl(inventoryUrl);
+    const [existingDealer] = await this.listDealers();
+    const dealer = existingDealer
+      ? await this.store.saveDealer({ ...existingDealer, name: inferredName })
+      : await this.createDealer({ name: inferredName });
+    const [existingRooftop] = await this.listRooftops({ dealerId: dealer.id });
+    const rooftop = existingRooftop
+      ? await this.store.saveRooftop({ ...existingRooftop, name: inferredName })
+      : await this.createRooftop({
+      dealerId: dealer.id,
+      name: inferredName,
+      location: null,
+      phone: null
+    });
+
+    const source = await this.createInventorySource({
+      rooftopId: rooftop.id,
+      name: `${inferredName} inventory`,
+      type: INVENTORY_SOURCE_TYPES.WEBSITE_INVENTORY_URL,
+      format: INVENTORY_SOURCE_FORMATS.FIRECRAWL_STRUCTURED_V1,
+      sourceUrl: inventoryUrl
+    });
+    const sync = await this.syncInventorySource(source.id);
+
+    return {
+      dealer,
+      rooftop,
+      inventorySource: sync.inventorySource,
+      syncRun: sync.syncRun,
+      summary: sync.summary,
+      health: sync.health,
+      inferred: {
+        dealerName: inferredName,
+        sourceUrl: inventoryUrl
+      }
+    };
+  }
+
   async listInventorySources({ rooftopId } = {}) {
     return this.store.listInventorySources({ rooftopId });
   }
@@ -171,6 +380,254 @@ export class LotPilotService {
     }
 
     return listing;
+  }
+
+  async ensurePostingAccount(rooftopId) {
+    const accounts = await this.store.listPostingAccounts({ rooftopId, status: 'active' });
+    if (accounts[0]) return accounts[0];
+    return this.store.savePostingAccount(defaultPostingAccount(rooftopId));
+  }
+
+  async listPostingAccounts({ rooftopId, status } = {}) {
+    return this.store.listPostingAccounts({ rooftopId, status });
+  }
+
+  async listPostingJobs({ rooftopId, status, active } = {}) {
+    return this.store.listPostingJobs({ rooftopId, status, active });
+  }
+
+  async getPostingJob(jobId) {
+    const job = await this.store.getPostingJob(jobId);
+    if (!job) {
+      throw new Error(`Posting job ${jobId} was not found`);
+    }
+
+    return job;
+  }
+
+  async rebuildPostingQueue(rooftopId, { actor = 'system' } = {}) {
+    const rooftop = await this.getRooftop(rooftopId);
+    const account = await this.ensurePostingAccount(rooftopId);
+    const [listings, vehicles, activeJobs] = await Promise.all([
+      this.listListings({ rooftopId }),
+      this.listVehicles({ rooftopId }),
+      this.store.listPostingJobs({ rooftopId, active: true })
+    ]);
+    const vehicleById = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
+    const activeJobKeys = new Set(activeJobs.map((job) => `${job.listingId}:${job.action}`));
+    const now = new Date();
+    const createdJobs = [];
+    const blockedJobs = [];
+    let scheduleIndex = activeJobs.filter((job) => job.status !== 'blocked').length;
+
+    for (const listing of listings) {
+      const vehicle = vehicleById.get(listing.vehicleId);
+      if (!vehicle) continue;
+
+      const action = postingActionFor(listing, vehicle);
+      if (!action) continue;
+
+      const key = `${listing.id}:${action}`;
+      if (activeJobKeys.has(key)) continue;
+
+      const checks = action === 'remove'
+        ? [{ key: 'remove_existing_listing', ok: true, message: 'Removal job is allowed for unavailable inventory.' }]
+        : blockedPostingChecks({ listing, vehicle, rooftop });
+      const failedChecks = checks.filter((check) => !check.ok);
+      const scheduledFor = new Date(now.getTime() + scheduleIndex * account.spacingMinutes * 60 * 1000).toISOString();
+      const job = {
+        id: createId('posting_job'),
+        rooftopId,
+        listingId: listing.id,
+        vehicleId: vehicle.id,
+        accountId: account.id,
+        action,
+        status: failedChecks.length ? 'blocked' : 'pending',
+        priority: priorityForPostingJob(action, vehicle),
+        scheduledFor,
+        claimedAt: null,
+        completedAt: null,
+        failedAt: null,
+        snoozedUntil: null,
+        liveUrl: null,
+        lastError: failedChecks.map((check) => check.message).join(' '),
+        complianceChecks: checks,
+        metadata: {
+          actor,
+          vehicleLabel: vehicleLabel(vehicle),
+          autoSubmitEnabled: account.autoSubmitEnabled,
+          runner: account.settings?.runner ?? 'chrome_extension'
+        },
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+        attempts: []
+      };
+
+      await this.store.savePostingJob(job);
+      activeJobKeys.add(key);
+
+      if (job.status === 'blocked') {
+        blockedJobs.push(job);
+      } else {
+        createdJobs.push(job);
+        scheduleIndex += 1;
+      }
+
+      const queuedState = POSTING_ACTION_STATES[action]?.queued;
+      if (queuedState && canTransitionListingState(listing.state, queuedState)) {
+        await this.transitionListing(listing.id, queuedState, {
+          actor,
+          reason: `Posting ${action} job queued`,
+          metadata: { postingJobId: job.id }
+        });
+      }
+    }
+
+    return { account, createdJobs, blockedJobs, existingActiveJobs: activeJobs };
+  }
+
+  async postingPayload(job) {
+    const [listing, vehicle, account] = await Promise.all([
+      this.getListing(job.listingId),
+      this.getVehicle(job.vehicleId),
+      job.accountId ? this.store.getPostingAccount(job.accountId) : null
+    ]);
+    return { job, listing, vehicle, account };
+  }
+
+  async claimPostingJob(jobId, { actor = 'chrome_extension' } = {}) {
+    let job = await this.getPostingJob(jobId);
+    if (!['pending', 'needs_manual_review'].includes(job.status)) {
+      throw new Error(`Posting job ${job.id} cannot be claimed from ${job.status}`);
+    }
+
+    const now = nowIso();
+    job = await this.store.savePostingJob({
+      ...job,
+      status: 'claimed',
+      claimedAt: now,
+      updatedAt: now,
+      metadata: { ...job.metadata, claimedBy: actor }
+    });
+
+    const states = POSTING_ACTION_STATES[job.action];
+    const listing = await this.getListing(job.listingId);
+    if (states?.inProgress && canTransitionListingState(listing.state, states.inProgress)) {
+      await this.transitionListing(listing.id, states.inProgress, {
+        actor,
+        reason: `Posting ${job.action} job claimed`,
+        metadata: { postingJobId: job.id }
+      });
+    }
+
+    return this.postingPayload(job);
+  }
+
+  async claimNextPostingJob({ rooftopId = null, actor = 'chrome_extension' } = {}) {
+    const jobs = await this.store.listPostingJobs({ rooftopId, status: 'pending' });
+    const now = Date.now();
+    const job = jobs
+      .filter((candidate) => (
+        new Date(candidate.scheduledFor).getTime() <= now &&
+        (!candidate.snoozedUntil || new Date(candidate.snoozedUntil).getTime() <= now)
+      ))
+      .sort((left, right) => (
+        right.priority - left.priority ||
+        new Date(left.scheduledFor).getTime() - new Date(right.scheduledFor).getTime()
+      ))[0];
+    if (!job) {
+      throw new Error('No pending posting jobs are available.');
+    }
+
+    return this.claimPostingJob(job.id, { actor });
+  }
+
+  async completePostingJob(jobId, payload = {}, { actor = 'chrome_extension' } = {}) {
+    let job = await this.getPostingJob(jobId);
+    const now = nowIso();
+    const attempt = {
+      id: createId('posting_attempt'),
+      jobId: job.id,
+      status: 'completed',
+      method: payload.method ?? 'chrome_extension',
+      startedAt: payload.startedAt ?? job.claimedAt ?? now,
+      completedAt: now,
+      result: payload.result ?? {},
+      error: null,
+      metadata: payload.metadata ?? {}
+    };
+    await this.store.savePostingAttempt(attempt);
+    job = await this.store.savePostingJob({
+      ...job,
+      status: 'completed',
+      completedAt: now,
+      liveUrl: payload.liveUrl ?? payload.result?.liveUrl ?? job.liveUrl,
+      lastError: null,
+      updatedAt: now
+    });
+
+    const states = POSTING_ACTION_STATES[job.action];
+    const listing = await this.getListing(job.listingId);
+    if (states?.completed && canTransitionListingState(listing.state, states.completed)) {
+      await this.transitionListing(listing.id, states.completed, {
+        actor,
+        reason: `Posting ${job.action} job completed`,
+        metadata: { postingJobId: job.id, liveUrl: job.liveUrl }
+      });
+    }
+
+    return this.postingPayload(job);
+  }
+
+  async failPostingJob(jobId, payload = {}, { actor = 'chrome_extension' } = {}) {
+    let job = await this.getPostingJob(jobId);
+    const now = nowIso();
+    const attempt = {
+      id: createId('posting_attempt'),
+      jobId: job.id,
+      status: 'failed',
+      method: payload.method ?? 'chrome_extension',
+      startedAt: payload.startedAt ?? job.claimedAt ?? now,
+      completedAt: now,
+      result: payload.result ?? {},
+      error: payload.error ?? 'Posting job failed',
+      metadata: payload.metadata ?? {}
+    };
+    await this.store.savePostingAttempt(attempt);
+    job = await this.store.savePostingJob({
+      ...job,
+      status: payload.needsManualReview === false ? 'failed' : 'needs_manual_review',
+      failedAt: now,
+      lastError: attempt.error,
+      updatedAt: now
+    });
+
+    const states = POSTING_ACTION_STATES[job.action];
+    const listing = await this.getListing(job.listingId);
+    if (states?.failed && canTransitionListingState(listing.state, states.failed)) {
+      await this.transitionListing(listing.id, states.failed, {
+        actor,
+        reason: `Posting ${job.action} job failed`,
+        metadata: { postingJobId: job.id, error: attempt.error }
+      });
+    }
+
+    return this.postingPayload(job);
+  }
+
+  async snoozePostingJob(jobId, { minutes = 60, actor = 'dealer-app' } = {}) {
+    const job = await this.getPostingJob(jobId);
+    const now = nowIso();
+    const snoozedUntil = new Date(Date.now() + Number(minutes || 60) * 60 * 1000).toISOString();
+    const updated = await this.store.savePostingJob({
+      ...job,
+      status: 'snoozed',
+      snoozedUntil,
+      updatedAt: now,
+      metadata: { ...job.metadata, snoozedBy: actor }
+    });
+
+    return this.postingPayload(updated);
   }
 
   async listLeads({ rooftopId, status } = {}) {
@@ -744,7 +1201,7 @@ export class LotPilotService {
     return invitations;
   }
 
-  async createNotificationRecipient({ rooftopId, userId = null, channel, destination }) {
+  async createNotificationRecipient({ rooftopId, userId = null, channel, destination, label = null, rules = {}, isActive = true }) {
     if (!['sms', 'email'].includes(channel)) throw new Error(`Invalid notification channel '${channel}'`);
     if (!destination) throw new Error('Notification destination is required');
     return this.store.saveNotificationRecipient({
@@ -753,14 +1210,30 @@ export class LotPilotService {
       userId,
       channel,
       destination: destination.trim(),
-      isActive: true,
+      label: label?.trim() || null,
+      rules: normalizeNotificationRules(rules),
+      isActive: Boolean(isActive),
       createdAt: nowIso(),
       updatedAt: nowIso()
     });
   }
 
-  async deliverLeadNotifications(lead) {
-    const recipients = await this.store.listNotificationRecipients({ rooftopId: lead.rooftopId, isActive: true });
+  async updateNotificationRecipient(recipientId, updates = {}) {
+    const recipient = await this.store.getNotificationRecipient(recipientId);
+    if (!recipient) throw new Error(`Notification recipient ${recipientId} was not found`);
+
+    return this.store.saveNotificationRecipient({
+      ...recipient,
+      label: updates.label === undefined
+        ? recipient.label ?? null
+        : (typeof updates.label === 'string' && updates.label.trim() ? updates.label.trim() : null),
+      rules: normalizeNotificationRules(updates.rules ?? recipient.rules),
+      isActive: updates.isActive === undefined ? recipient.isActive : Boolean(updates.isActive),
+      updatedAt: nowIso()
+    });
+  }
+
+  async composeLeadNotification(lead) {
     const vehicle = await this.getVehicle(lead.vehicleId);
     const subject = `New lead: ${[vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ')}`;
     const text = [
@@ -770,6 +1243,59 @@ export class LotPilotService {
       lead.contactPhone ? `Phone: ${lead.contactPhone}` : null,
       lead.sourceMessage ? `Message: ${lead.sourceMessage}` : null
     ].filter(Boolean).join('\n');
+    return { subject, text, vehicle };
+  }
+
+  async sendLeadNotificationToRecipient(lead, recipient, existingDelivery = null) {
+    const { subject, text } = await this.composeLeadNotification(lead);
+    let delivery = existingDelivery ?? {
+      id: createId('notification_delivery'),
+      leadId: lead.id,
+      recipientId: recipient.id,
+      channel: recipient.channel,
+      status: 'queued',
+      attempts: 0,
+      providerId: null,
+      lastError: null,
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    };
+    delivery = { ...delivery, status: 'queued', updatedAt: nowIso() };
+    await this.store.saveNotificationDelivery(delivery);
+    try {
+      if (!recipient.isActive) throw new Error('Notification recipient is inactive');
+      const result = await this.notificationAdapter.send({
+        channel: recipient.channel,
+        destination: recipient.destination,
+        subject,
+        text
+      });
+      delivery = {
+        ...delivery,
+        channel: recipient.channel,
+        status: 'sent',
+        attempts: delivery.attempts + 1,
+        providerId: result.providerId,
+        lastError: null,
+        updatedAt: nowIso()
+      };
+    } catch (error) {
+      delivery = {
+        ...delivery,
+        channel: recipient.channel,
+        status: 'failed',
+        attempts: delivery.attempts + 1,
+        lastError: error.message,
+        updatedAt: nowIso()
+      };
+    }
+    return this.store.saveNotificationDelivery(delivery);
+  }
+
+  async deliverLeadNotifications(lead) {
+    const recipients = selectNotificationRecipients(
+      await this.store.listNotificationRecipients({ rooftopId: lead.rooftopId, isActive: true })
+    );
 
     return Promise.all(recipients.map(async (recipient) => {
       let delivery = {
@@ -785,19 +1311,35 @@ export class LotPilotService {
         updatedAt: nowIso()
       };
       await this.store.saveNotificationDelivery(delivery);
-      try {
-        const result = await this.notificationAdapter.send({
-          channel: recipient.channel,
-          destination: recipient.destination,
-          subject,
-          text
-        });
-        delivery = { ...delivery, status: 'sent', attempts: 1, providerId: result.providerId, updatedAt: nowIso() };
-      } catch (error) {
-        delivery = { ...delivery, status: 'failed', attempts: 1, lastError: error.message, updatedAt: nowIso() };
-      }
-      return this.store.saveNotificationDelivery(delivery);
+      return this.sendLeadNotificationToRecipient(lead, recipient, delivery);
     }));
+  }
+
+  async listNotificationDeliveries({ leadId, status } = {}) {
+    return this.store.listNotificationDeliveries({ leadId, status });
+  }
+
+  async retryFailedLeadNotifications(leadId) {
+    const lead = await this.getLead(leadId);
+    const failedDeliveries = await this.store.listNotificationDeliveries({ leadId, status: 'failed' });
+    return Promise.all(failedDeliveries.map(async (delivery) => {
+      const recipient = await this.store.getNotificationRecipient(delivery.recipientId);
+      if (!recipient) {
+        return this.store.saveNotificationDelivery({
+          ...delivery,
+          attempts: delivery.attempts + 1,
+          lastError: 'Notification recipient was not found',
+          updatedAt: nowIso()
+        });
+      }
+      return this.sendLeadNotificationToRecipient(lead, recipient, delivery);
+    }));
+  }
+
+  async recordLeadEvent(leadId, type, metadata = {}) {
+    const lead = await this.getLead(leadId);
+    const updatedLead = appendLeadEvent(lead, type, metadata);
+    return this.store.saveLead(updatedLead);
   }
 
   async ingestInboundLead({ rooftopId, vehicleId, externalId, payload }) {

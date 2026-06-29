@@ -1,13 +1,15 @@
 const DEFAULT_API_BASE_URL = 'http://127.0.0.1:3000';
-const TARGET = 'facebook_marketplace';
-const STORAGE_KEYS = ['apiBaseUrl', 'listingId', 'accessToken', 'lastListing'];
+const TARGET = 'facebook_marketplace_vehicle';
+const STORAGE_KEYS = ['apiBaseUrl', 'listingId', 'rooftopId', 'accessToken', 'lastListing', 'lastVehicle', 'lastJob'];
 
 const elements = {
   apiBaseUrl: document.getElementById('apiBaseUrl'),
   listingId: document.getElementById('listingId'),
+  rooftopId: document.getElementById('rooftopId'),
   accessToken: document.getElementById('accessToken'),
   loadListing: document.getElementById('loadListing'),
   postAssist: document.getElementById('postAssist'),
+  runNextJob: document.getElementById('runNextJob'),
   fillText: document.getElementById('fillText'),
   uploadPhotos: document.getElementById('uploadPhotos'),
   downloadPhotos: document.getElementById('downloadPhotos'),
@@ -47,43 +49,106 @@ function extractListingIdFromUrl(url) {
   }
 }
 
-function extractPost(listing) {
+function numberText(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const number = Number(String(value).replace(/[^\d.-]/g, ''));
+  return Number.isFinite(number) ? String(Math.round(number)) : '';
+}
+
+function titleCase(value) {
+  return String(value || '').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function conditionForMarketplace(value) {
+  const condition = String(value || '').toLowerCase();
+  if (condition.includes('new')) return 'New';
+  if (condition.includes('certified') || condition.includes('used')) return 'Good';
+  return condition ? titleCase(condition) : 'Good';
+}
+
+function normalizeTransmission(value) {
+  const transmission = String(value || '').toLowerCase();
+  if (transmission.includes('manual')) return 'Manual';
+  if (transmission.includes('auto')) return 'Automatic';
+  return value || '';
+}
+
+function normalizeFuelType(value) {
+  const fuel = String(value || '').toLowerCase();
+  if (fuel.includes('diesel')) return 'Diesel';
+  if (fuel.includes('electric')) return 'Electric';
+  if (fuel.includes('hybrid')) return 'Hybrid';
+  if (fuel.includes('flex')) return 'Flex';
+  if (fuel.includes('gas')) return 'Gasoline';
+  return value || '';
+}
+
+function vehicleTitle(vehicle, fallbackTitle) {
+  if (!vehicle) return fallbackTitle || '';
+  return [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(' ') || fallbackTitle || vehicle.vin || '';
+}
+
+function extractPost(listing, vehicle = null) {
   const post = listing?.draft?.marketplacePost;
   if (!post) throw new Error('This listing does not have a Marketplace post draft.');
 
+  const title = post.title ?? listing.draft?.title ?? vehicleTitle(vehicle, '');
   return {
     listingId: listing.id,
+    vehicleId: listing.vehicleId,
     target: TARGET,
-    title: post.title ?? listing.draft?.title ?? '',
-    price: post.price === null || post.price === undefined ? '' : String(post.price),
+    title,
+    price: numberText(post.price ?? vehicle?.price),
     description: post.description ?? listing.draft?.longDescription ?? '',
     category: post.category ?? 'Vehicles',
+    vehicle: {
+      title: vehicleTitle(vehicle, title),
+      year: vehicle?.year ? String(vehicle.year) : '',
+      make: vehicle?.make ?? '',
+      model: vehicle?.model ?? '',
+      trim: vehicle?.trim ?? '',
+      mileage: numberText(vehicle?.mileage),
+      condition: conditionForMarketplace(vehicle?.condition),
+      bodyStyle: vehicle?.bodyStyle ?? '',
+      exteriorColor: vehicle?.exteriorColor ?? '',
+      interiorColor: vehicle?.interiorColor ?? '',
+      transmission: normalizeTransmission(vehicle?.transmission),
+      fuelType: normalizeFuelType(vehicle?.fuelType),
+      drivetrain: vehicle?.drivetrain ?? '',
+      vin: vehicle?.vin ?? '',
+      stockNumber: vehicle?.stockNumber ?? ''
+    },
     photoUrls: Array.isArray(post.photoUrls) ? post.photoUrls : []
   };
 }
 
-function renderPreview(listing) {
-  const post = extractPost(listing);
+function renderPreview(listing, vehicle = null) {
+  const post = extractPost(listing, vehicle);
   elements.preview.hidden = false;
   elements.preview.innerHTML = `
     <div><strong>Target</strong><span class="copy"></span></div>
     <div><strong>Title</strong><span class="copy"></span></div>
     <div><strong>Price</strong><span class="copy"></span></div>
+    <div><strong>Vehicle</strong><span class="copy"></span></div>
     <div><strong>Description</strong><span class="copy"></span></div>
     <div><strong>Photos</strong><span class="copy"></span></div>
   `;
   const copyFields = elements.preview.querySelectorAll('.copy');
-  copyFields[0].textContent = 'Facebook Marketplace';
+  copyFields[0].textContent = 'Facebook Marketplace vehicle sale';
   copyFields[1].textContent = post.title;
   copyFields[2].textContent = post.price || 'No price';
-  copyFields[3].textContent = post.description.slice(0, 360) + (post.description.length > 360 ? '...' : '');
-  copyFields[4].textContent = `${post.photoUrls.length} URL${post.photoUrls.length === 1 ? '' : 's'}; auto-upload tries first 10 / 15 MB.`;
+  copyFields[3].textContent = [post.vehicle.year, post.vehicle.make, post.vehicle.model, post.vehicle.mileage ? `${post.vehicle.mileage} miles` : '']
+    .filter(Boolean)
+    .join(' ');
+  copyFields[4].textContent = post.description.slice(0, 360) + (post.description.length > 360 ? '...' : '');
+  copyFields[5].textContent = `${post.photoUrls.length} URL${post.photoUrls.length === 1 ? '' : 's'}; auto-upload tries first 10 / 15 MB.`;
 }
 
 async function saveSettings() {
   await chrome.storage.local.set({
     apiBaseUrl: normalizeApiBaseUrl(elements.apiBaseUrl.value),
     listingId: elements.listingId.value.trim(),
+    rooftopId: elements.rooftopId.value.trim(),
     accessToken: elements.accessToken.value.trim()
   });
 }
@@ -92,6 +157,7 @@ async function loadSettings() {
   const stored = await chrome.storage.local.get(STORAGE_KEYS);
   elements.apiBaseUrl.value = stored.apiBaseUrl || DEFAULT_API_BASE_URL;
   elements.listingId.value = stored.listingId || '';
+  elements.rooftopId.value = stored.rooftopId || '';
   elements.accessToken.value = stored.accessToken || '';
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -102,29 +168,43 @@ async function loadSettings() {
     setStatus('Detected listing ID from the active LotPilot tab.');
   }
 
-  if (stored.lastListing) renderPreview(stored.lastListing);
+  if (stored.lastListing) renderPreview(stored.lastListing, stored.lastVehicle ?? null);
 }
 
 async function fetchListing() {
   await saveSettings();
   const apiBaseUrl = normalizeApiBaseUrl(elements.apiBaseUrl.value);
-  const listingId = elements.listingId.value.trim();
-  const accessToken = elements.accessToken.value.trim();
-  if (!listingId) throw new Error('Listing ID is required.');
+  const headers = authHeaders();
+  let listingId = elements.listingId.value.trim();
 
-  const response = await fetch(`${apiBaseUrl}/api/listings/${encodeURIComponent(listingId)}`, {
-    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
-  });
+  if (!listingId) {
+    const listingsResponse = await fetch(`${apiBaseUrl}/api/listings`, { headers });
+    const listings = await listingsResponse.json().catch(() => []);
+    if (!listingsResponse.ok) throw new Error(listings.error ?? `LotPilot returned ${listingsResponse.status}.`);
+    const latest = listings
+      .filter((listing) => listing?.draft?.marketplacePost)
+      .sort((left, right) => new Date(right.updatedAt ?? right.createdAt).getTime() - new Date(left.updatedAt ?? left.createdAt).getTime())[0];
+    if (!latest) throw new Error('No Marketplace drafts are available. Paste a listing ID or create a draft first.');
+    listingId = latest.id;
+    elements.listingId.value = listingId;
+    await saveSettings();
+  }
+
+  const response = await fetch(`${apiBaseUrl}/api/listings/${encodeURIComponent(listingId)}`, { headers });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error ?? `LotPilot returned ${response.status}.`);
-  await chrome.storage.local.set({ lastListing: payload });
-  renderPreview(payload);
-  return payload;
+  const vehicleResponse = await fetch(`${apiBaseUrl}/api/vehicles/${encodeURIComponent(payload.vehicleId)}`, { headers });
+  const vehicle = vehicleResponse.ok ? await vehicleResponse.json().catch(() => null) : null;
+  await chrome.storage.local.set({ lastListing: payload, lastVehicle: vehicle });
+  renderPreview(payload, vehicle);
+  return { listing: payload, vehicle };
 }
 
 async function getListingFromCacheOrApi() {
-  const stored = await chrome.storage.local.get(['lastListing', 'listingId']);
-  if (stored.lastListing?.id === elements.listingId.value.trim()) return stored.lastListing;
+  const stored = await chrome.storage.local.get(['lastListing', 'lastVehicle', 'listingId']);
+  if (stored.lastListing?.id === elements.listingId.value.trim()) {
+    return { listing: stored.lastListing, vehicle: stored.lastVehicle ?? null };
+  }
   return fetchListing();
 }
 
@@ -132,6 +212,19 @@ async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error('No active tab is available.');
   return tab;
+}
+
+function isSupportedTargetUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.hostname.endsWith('facebook.com') ||
+      parsed.hostname === 'localhost' ||
+      parsed.hostname === '127.0.0.1'
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function ensureContentScript(tab) {
@@ -147,9 +240,57 @@ async function ensureContentScript(tab) {
 
 async function sendToActiveTab(type, payload) {
   const tab = await activeTab();
+  if (!isSupportedTargetUrl(tab.url)) {
+    throw new Error('Open the Facebook Marketplace vehicle-sale form before running Post Vehicle.');
+  }
   await ensureContentScript(tab);
   const result = await chrome.tabs.sendMessage(tab.id, { type, payload });
   return { tab, result };
+}
+
+function authHeaders(extra = {}) {
+  const accessToken = elements.accessToken.value.trim();
+  return {
+    ...extra,
+    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+  };
+}
+
+async function apiJson(path, options = {}) {
+  const apiBaseUrl = normalizeApiBaseUrl(elements.apiBaseUrl.value);
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    ...options,
+    headers: authHeaders({
+      'Content-Type': 'application/json',
+      ...(options.headers ?? {})
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error ?? `LotPilot returned ${response.status}.`);
+  return payload;
+}
+
+async function claimNextJob() {
+  await saveSettings();
+  const rooftopId = elements.rooftopId.value.trim() || null;
+  return apiJson('/api/posting-jobs/claim-next', {
+    method: 'POST',
+    body: JSON.stringify({ rooftopId, actor: 'chrome_extension' })
+  });
+}
+
+async function completeJob(jobId, payload) {
+  return apiJson(`/api/posting-jobs/${encodeURIComponent(jobId)}/complete`, {
+    method: 'POST',
+    body: JSON.stringify({ ...payload, actor: 'chrome_extension' })
+  });
+}
+
+async function failJob(jobId, payload) {
+  return apiJson(`/api/posting-jobs/${encodeURIComponent(jobId)}/fail`, {
+    method: 'POST',
+    body: JSON.stringify({ ...payload, actor: 'chrome_extension' })
+  });
 }
 
 function activityMetadata(post, tab, result, extra = {}) {
@@ -237,10 +378,10 @@ async function downloadPhotos(post) {
 async function runPostAssist() {
   resetSteps();
   addStep('Loading reviewed listing...');
-  const listing = await getListingFromCacheOrApi();
-  const post = extractPost(listing);
+  const { listing, vehicle } = await getListingFromCacheOrApi();
+  const post = extractPost(listing, vehicle);
 
-  addStep('Filling title, price, and description...');
+  addStep('Filling vehicle sale fields...');
   const text = await fillText(post, { record: false });
   const filled = text.result?.filledFields?.length ?? 0;
   const missing = text.result?.missingFields?.length ?? 0;
@@ -287,11 +428,95 @@ async function runPostAssist() {
     photoErrors
   });
 
-  setStatus(`Post Assist complete. Review the tab manually before publishing.`);
+  setStatus('Vehicle post assist complete. Review Facebook manually before publishing.');
+}
+
+async function submitMarketplace(post) {
+  const { tab, result } = await sendToActiveTab('LOTPILOT_SUBMIT_MARKETPLACE', post);
+  return { tab, result };
+}
+
+async function runNextPostingJob() {
+  resetSteps();
+  addStep('Claiming next ready posting job...');
+  const payload = await claimNextJob();
+  const { job, listing, vehicle, account } = payload;
+  await chrome.storage.local.set({ lastJob: job, lastListing: listing, lastVehicle: vehicle, listingId: listing.id });
+  elements.listingId.value = listing.id;
+  renderPreview(listing, vehicle);
+
+  if (job.action === 'remove') {
+    await failJob(job.id, {
+      method: 'chrome_extension_queue_runner',
+      error: 'Removal jobs require a live Marketplace URL and manual delete support.',
+      metadata: { action: job.action }
+    });
+    throw new Error('Claimed a removal job. It was marked for manual review because delete automation is not supported yet.');
+  }
+
+  const post = extractPost(listing, vehicle);
+  post.jobId = job.id;
+  addStep(`Claimed ${job.action} job for ${post.title}.`);
+
+  addStep('Filling Marketplace vehicle fields...');
+  const text = await fillText(post, { record: false, method: 'chrome_extension_queue_fill' });
+  const filled = text.result?.filledFields?.length ?? 0;
+  const missing = text.result?.missingFields?.length ?? 0;
+  addStep(`Text fill: ${filled} field${filled === 1 ? '' : 's'} filled${missing ? `, ${missing} missing` : ''}.`, missing ? 'warn' : 'ok');
+
+  let photoPayload = null;
+  let photoResult = null;
+  if (post.photoUrls.length) {
+    addStep('Uploading ordered photos...');
+    const upload = await uploadPhotos(post);
+    photoPayload = upload.photoPayload;
+    photoResult = upload.result;
+    const uploaded = photoResult?.photoUploaded ?? 0;
+    addStep(`Photo upload: ${uploaded} attached.`, uploaded ? 'ok' : 'warn');
+  }
+
+  const shouldSubmit = account?.autoSubmitEnabled !== false;
+  let submit = { result: { submitted: false, clickedButtons: [], error: 'Auto-submit disabled.' }, tab: text.tab };
+  if (shouldSubmit) {
+    addStep('Attempting Marketplace publish flow...');
+    submit = await submitMarketplace(post);
+    const clicked = submit.result?.clickedButtons ?? [];
+    addStep(`Submit flow clicked: ${clicked.length ? clicked.join(' -> ') : 'no publish button found'}.`, submit.result?.submitted ? 'ok' : 'warn');
+  }
+
+  const result = {
+    liveUrl: submit.result?.liveUrl ?? submit.tab?.url,
+    fill: text.result,
+    photos: {
+      requested: post.photoUrls.length,
+      fetched: photoPayload?.fetched ?? 0,
+      uploaded: photoResult?.photoUploaded ?? 0,
+      errors: [...(photoPayload?.errors ?? []), ...(photoResult?.errors ?? [])]
+    },
+    submit: submit.result
+  };
+
+  if (shouldSubmit && submit.result?.submitted) {
+    await completeJob(job.id, {
+      method: 'chrome_extension_queue_runner',
+      liveUrl: result.liveUrl,
+      result
+    });
+    setStatus('Posting job completed and marked published.');
+    return;
+  }
+
+  await failJob(job.id, {
+    method: 'chrome_extension_queue_runner',
+    error: submit.result?.error ?? 'The extension could not confirm Marketplace publish.',
+    result,
+    needsManualReview: true
+  });
+  throw new Error('Job filled, but publish could not be confirmed. It was marked for manual review.');
 }
 
 async function withPending(button, task) {
-  const buttons = [elements.loadListing, elements.postAssist, elements.fillText, elements.uploadPhotos, elements.downloadPhotos];
+  const buttons = [elements.loadListing, elements.postAssist, elements.runNextJob, elements.fillText, elements.uploadPhotos, elements.downloadPhotos];
   buttons.forEach((item) => {
     item.disabled = true;
   });
@@ -310,7 +535,7 @@ async function withPending(button, task) {
 elements.loadListing.addEventListener('click', () =>
   withPending(elements.loadListing, async () => {
     resetSteps();
-    const listing = await fetchListing();
+    const { listing } = await fetchListing();
     setStatus(`Loaded ${listing.id}.`);
   })
 );
@@ -319,11 +544,15 @@ elements.postAssist.addEventListener('click', () =>
   withPending(elements.postAssist, runPostAssist)
 );
 
+elements.runNextJob.addEventListener('click', () =>
+  withPending(elements.runNextJob, runNextPostingJob)
+);
+
 elements.fillText.addEventListener('click', () =>
   withPending(elements.fillText, async () => {
     resetSteps();
-    const listing = await getListingFromCacheOrApi();
-    const post = extractPost(listing);
+    const { listing, vehicle } = await getListingFromCacheOrApi();
+    const post = extractPost(listing, vehicle);
     const { result } = await fillText(post, { method: 'chrome_extension_text_fill' });
     const filled = result?.filledFields?.length ?? 0;
     const missing = result?.missingFields?.length ?? 0;
@@ -334,8 +563,8 @@ elements.fillText.addEventListener('click', () =>
 elements.uploadPhotos.addEventListener('click', () =>
   withPending(elements.uploadPhotos, async () => {
     resetSteps();
-    const listing = await getListingFromCacheOrApi();
-    const post = extractPost(listing);
+    const { listing, vehicle } = await getListingFromCacheOrApi();
+    const post = extractPost(listing, vehicle);
     const upload = await uploadPhotos(post);
     await recordActivity(post, upload.tab, {}, {
       method: 'chrome_extension_photo_upload',
@@ -353,8 +582,8 @@ elements.uploadPhotos.addEventListener('click', () =>
 elements.downloadPhotos.addEventListener('click', () =>
   withPending(elements.downloadPhotos, async () => {
     resetSteps();
-    const listing = await getListingFromCacheOrApi();
-    const post = extractPost(listing);
+    const { listing, vehicle } = await getListingFromCacheOrApi();
+    const post = extractPost(listing, vehicle);
     const { tab, result } = await downloadPhotos(post);
     await recordActivity(post, tab, {}, {
       method: 'chrome_extension_photo_download',
@@ -373,7 +602,7 @@ elements.clearToken.addEventListener('click', async () => {
   setStatus('Token cleared.');
 });
 
-for (const input of [elements.apiBaseUrl, elements.listingId, elements.accessToken]) {
+for (const input of [elements.apiBaseUrl, elements.listingId, elements.rooftopId, elements.accessToken]) {
   input.addEventListener('change', saveSettings);
 }
 

@@ -56,6 +56,7 @@
       }
 
       input,
+      select,
       textarea,
       [contenteditable] {
         border: 1px solid var(--line);
@@ -68,6 +69,12 @@
       textarea,
       [contenteditable] {
         min-height: 140px;
+      }
+
+      .field-grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: 1fr 1fr;
       }
 
       .dropzone {
@@ -98,10 +105,87 @@
           <input aria-label="Title" placeholder="Vehicle title">
         </label>
 
-        <label>
-          Price
-          <input aria-label="Price" inputmode="numeric" placeholder="Asking price">
-        </label>
+        <div class="field-grid">
+          <label>
+            Year
+            <input aria-label="Year" placeholder="Year">
+          </label>
+
+          <label>
+            Make
+            <input aria-label="Make" placeholder="Make">
+          </label>
+        </div>
+
+        <div class="field-grid">
+          <label>
+            Model
+            <input aria-label="Model" placeholder="Model">
+          </label>
+
+          <label>
+            Mileage
+            <input aria-label="Mileage" inputmode="numeric" placeholder="Mileage">
+          </label>
+        </div>
+
+        <div class="field-grid">
+          <label>
+            Price
+            <input aria-label="Price" inputmode="numeric" placeholder="Asking price">
+          </label>
+
+          <label>
+            Condition
+            <select aria-label="Vehicle condition">
+              <option value="">Choose</option>
+              <option>Excellent</option>
+              <option>Good</option>
+              <option>Fair</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="field-grid">
+          <label>
+            Body style
+            <select aria-label="Body style">
+              <option value="">Choose</option>
+              <option>Sedan</option>
+              <option>SUV</option>
+              <option>Pickup Truck</option>
+              <option>Hatchback</option>
+            </select>
+          </label>
+
+          <label>
+            Exterior color
+            <input aria-label="Exterior color" placeholder="Exterior color">
+          </label>
+        </div>
+
+        <div class="field-grid">
+          <label>
+            Transmission
+            <select aria-label="Transmission">
+              <option value="">Choose</option>
+              <option>Automatic</option>
+              <option>Manual</option>
+            </select>
+          </label>
+
+          <label>
+            Fuel type
+            <select aria-label="Fuel type">
+              <option value="">Choose</option>
+              <option>Gasoline</option>
+              <option>Diesel</option>
+              <option>Hybrid</option>
+              <option>Electric</option>
+              <option>Flex</option>
+            </select>
+          </label>
+        </div>
 
         <label>
           Description

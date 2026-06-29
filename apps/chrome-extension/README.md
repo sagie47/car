@@ -1,9 +1,9 @@
 # LotPilot Marketplace Autofill Extension
 
-Local Chrome Manifest V3 extension for assisted Facebook Marketplace posting.
-It fetches a reviewed LotPilot listing, fills common title/price/description
-fields in the active tab, tries to attach photos, and falls back to ordered
-photo downloads when browser upload is blocked.
+Local Chrome Manifest V3 extension for assisted Facebook Marketplace vehicle
+posting. It fetches a reviewed LotPilot listing plus its vehicle record, fills
+the Marketplace vehicle-sale preset in the active tab, tries to attach photos,
+and falls back to ordered photo downloads when browser upload is blocked.
 
 ## Install locally
 
@@ -16,18 +16,18 @@ photo downloads when browser upload is blocked.
 ## Use with Facebook Marketplace
 
 1. Start the LotPilot backend. Use `http://127.0.0.1:3000` for the default backend, or `http://127.0.0.1:3100` if you are running the alternate local port.
-2. Log in to Facebook manually and open the Marketplace vehicle creation form.
+2. Log in to Facebook manually and open the Marketplace vehicle-sale creation form.
 3. Open the LotPilot extension popup.
 4. Set `API base URL`.
-5. Paste the LotPilot `listing_...` ID.
+5. Paste the LotPilot `listing_...` ID, or leave it blank to use the newest Marketplace draft.
 6. Add a bearer token only when `LOT_PILOT_REQUIRE_AUTH=true`.
-7. Click **Load**, then **Post Assist**.
+7. Click **Load**, then **Post Vehicle**.
 8. Review the Facebook form manually before submitting.
 
 ## Actions
 
-- **Post Assist** fills text, attempts photo upload, then downloads ordered photo files if upload fails.
-- **Fill Text** only fills title, price, and description.
+- **Post Vehicle** fills vehicle-sale fields, attempts photo upload, then downloads ordered photo files if upload fails.
+- **Fill Vehicle Fields** fills title, price, description, year, make, model, mileage, condition, body style, color, transmission, fuel type, and drivetrain when those fields are present.
 - **Auto Upload Photos** fetches up to 10 images / 15 MB total and tries to attach them to the active tab with a file input or drop event.
 - **Download Photos** downloads all photo URLs into `Downloads/LotPilot/<listingId>/` with deterministic ordered filenames.
 
@@ -38,8 +38,9 @@ mode, fetched/uploaded/downloaded counts, and photo errors.
 ## Local test page
 
 Open `apps/chrome-extension/test-page.html` in Chrome after loading the
-extension. It has Facebook-like `aria-label` fields and a multi-image file input
-for checking text fill and photo payload handling without using a live site.
+extension. It has Facebook-like vehicle fields and a multi-image file input for
+checking field fill and photo payload handling without using a live site. Serve
+it from localhost if Chrome blocks extension access to `file://` pages.
 
 ## Limits
 
@@ -47,6 +48,6 @@ for checking text fill and photo payload handling without using a live site.
   auto-upload is best effort; ordered downloads are the guaranteed fallback.
 - Facebook login and final publish stay manual.
 - Field matching is heuristic. It targets ARIA labels, labels, placeholders,
-  names, common textbox shapes, and contenteditable fields.
+  names, native selects, common textbox shapes, comboboxes, and contenteditable fields.
 - Supabase sessions are not shared with the extension yet. For authenticated
   beta environments, paste a short-lived access token or internal server token.

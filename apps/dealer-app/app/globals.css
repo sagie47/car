@@ -245,6 +245,7 @@ textarea {
 
 .field input,
 .field select,
+.field textarea,
 .inline-form input,
 .inline-form select {
   width: 100%;
@@ -252,6 +253,14 @@ textarea {
   border: 1px solid var(--border);
   padding: 12px 14px;
   background: rgba(255, 255, 255, 0.82);
+}
+
+.check-field {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  gap: 8px;
+  font-size: 0.9rem;
 }
 
 .field-grid,

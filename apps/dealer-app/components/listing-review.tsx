@@ -5,6 +5,13 @@ import { useRouter } from 'next/navigation';
 import type { Listing } from '../lib/types';
 import { recordListingActivity, updateListingDraft } from '../lib/api';
 
+function parsePriceInput(value: string) {
+  const clean = value.trim().replace(/[^\d.-]/g, '');
+  if (!clean) return null;
+  const parsed = Number(clean);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 export function ListingReview({ listing }: { listing: Listing }) {
   const router = useRouter();
   const post = listing.draft.marketplacePost;
@@ -19,10 +26,16 @@ export function ListingReview({ listing }: { listing: Listing }) {
 
   async function save() {
     setPending(true);
+    setMessage(null);
     try {
+      const parsedPrice = parsePriceInput(price);
+      if (parsedPrice === undefined) {
+        setMessage('Enter a valid price, for example 12977 or $12,977.');
+        return;
+      }
       await updateListingDraft(listing.id, {
         title,
-        price: price.trim() ? Number(price) : null,
+        price: parsedPrice,
         description,
         photoUrls
       });
@@ -88,7 +101,7 @@ export function ListingReview({ listing }: { listing: Listing }) {
       <div className="stack">
         <p><strong>Posting photos</strong></p>
         {photoUrls.map((url, index) => (
-          <div className="photo-row" key={url}>
+          <div className="photo-row" key={`${url}-${index}`}>
             <span className="mono-copy">{index + 1}. {url}</span>
             <button className="button button-compact" type="button" onClick={() => movePhoto(index, -1)}>Up</button>
             <button className="button button-compact" type="button" onClick={() => movePhoto(index, 1)}>Down</button>

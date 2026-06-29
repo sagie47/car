@@ -142,6 +142,16 @@ export function createHttpServer({ service = createDefaultService(), auth = crea
         return sendJson(response, 201, dealer);
       }
 
+      if (request.method === 'POST' && pathname === '/api/setup/inventory-url') {
+        const actor = await getActor();
+        const result = await service.setupFromInventoryUrl(await readJson(request));
+        if (!actor.bypass) {
+          await service.saveMembership({ dealerId: result.dealer.id, userId: actor.id, role: 'owner' });
+          await service.grantRooftopAccess({ rooftopId: result.rooftop.id, userId: actor.id });
+        }
+        return sendJson(response, 201, result);
+      }
+
       const dealerInviteMatch = matchPath(pathname, '/api/dealers/:dealerId/invitations');
       if (dealerInviteMatch && request.method === 'POST') {
         const actor = await getActor();
@@ -190,6 +200,18 @@ export function createHttpServer({ service = createDefaultService(), auth = crea
           response,
           201,
           await service.createNotificationRecipient({ ...body, rooftopId: rooftopRecipientMatch.rooftopId, userId: body.userId ?? actor.id })
+        );
+      }
+
+      const recipientMatch = matchPath(pathname, '/api/notification-recipients/:recipientId');
+      if (recipientMatch && request.method === 'PATCH') {
+        const recipient = await service.store.getNotificationRecipient(recipientMatch.recipientId);
+        if (!recipient) throw new Error(`Notification recipient ${recipientMatch.recipientId} was not found`);
+        await requireRooftop(recipient.rooftopId, 'manager');
+        return sendJson(
+          response,
+          200,
+          await service.updateNotificationRecipient(recipient.id, await readJson(request))
         );
       }
 
@@ -266,6 +288,19 @@ export function createHttpServer({ service = createDefaultService(), auth = crea
         return sendJson(response, 200, await service.listStaleVehicles(staleVehicleMatch.rooftopId));
       }
 
+      const rooftopPostingRebuildMatch = matchPath(pathname, '/api/rooftops/:rooftopId/posting-jobs/rebuild');
+      if (request.method === 'POST' && rooftopPostingRebuildMatch) {
+        const body = await readJson(request);
+        await requireRooftop(rooftopPostingRebuildMatch.rooftopId, 'manager');
+        return sendJson(
+          response,
+          200,
+          await service.rebuildPostingQueue(rooftopPostingRebuildMatch.rooftopId, {
+            actor: body.actor ?? 'dealer-app'
+          })
+        );
+      }
+
       if (request.method === 'GET' && pathname === '/api/listings') {
         if (searchParams.get('rooftopId')) await requireRooftop(searchParams.get('rooftopId'));
         return sendJson(response, 200, await service.listListings({ rooftopId: searchParams.get('rooftopId') }));
@@ -309,6 +344,76 @@ export function createHttpServer({ service = createDefaultService(), auth = crea
         await requireRooftop(listing.rooftopId);
         const body = await readJson(request);
         return sendJson(response, 201, await service.recordListingActivity(listing.id, body.type, body.metadata, { actor: actor.id }));
+      }
+
+      if (request.method === 'GET' && pathname === '/api/posting-jobs') {
+        const rooftopId = searchParams.get('rooftopId');
+        if (rooftopId) await requireRooftop(rooftopId);
+        return sendJson(
+          response,
+          200,
+          await service.listPostingJobs({
+            rooftopId,
+            status: searchParams.get('status'),
+            active: searchParams.get('active') === 'true' ? true : undefined
+          })
+        );
+      }
+
+      if (request.method === 'POST' && pathname === '/api/posting-jobs/claim-next') {
+        const body = await readJson(request);
+        if (body.rooftopId) await requireRooftop(body.rooftopId, 'manager');
+        return sendJson(
+          response,
+          200,
+          await service.claimNextPostingJob({
+            rooftopId: body.rooftopId ?? null,
+            actor: body.actor ?? 'chrome_extension'
+          })
+        );
+      }
+
+      const postingJobClaimMatch = matchPath(pathname, '/api/posting-jobs/:jobId/claim');
+      if (request.method === 'POST' && postingJobClaimMatch) {
+        const body = await readJson(request);
+        const job = await service.getPostingJob(postingJobClaimMatch.jobId);
+        await requireRooftop(job.rooftopId, 'manager');
+        return sendJson(response, 200, await service.claimPostingJob(job.id, { actor: body.actor ?? 'chrome_extension' }));
+      }
+
+      const postingJobCompleteMatch = matchPath(pathname, '/api/posting-jobs/:jobId/complete');
+      if (request.method === 'POST' && postingJobCompleteMatch) {
+        const body = await readJson(request);
+        const job = await service.getPostingJob(postingJobCompleteMatch.jobId);
+        await requireRooftop(job.rooftopId, 'manager');
+        return sendJson(
+          response,
+          200,
+          await service.completePostingJob(job.id, body, { actor: body.actor ?? 'chrome_extension' })
+        );
+      }
+
+      const postingJobFailMatch = matchPath(pathname, '/api/posting-jobs/:jobId/fail');
+      if (request.method === 'POST' && postingJobFailMatch) {
+        const body = await readJson(request);
+        const job = await service.getPostingJob(postingJobFailMatch.jobId);
+        await requireRooftop(job.rooftopId, 'manager');
+        return sendJson(response, 200, await service.failPostingJob(job.id, body, { actor: body.actor ?? 'chrome_extension' }));
+      }
+
+      const postingJobSnoozeMatch = matchPath(pathname, '/api/posting-jobs/:jobId/snooze');
+      if (request.method === 'POST' && postingJobSnoozeMatch) {
+        const body = await readJson(request);
+        const job = await service.getPostingJob(postingJobSnoozeMatch.jobId);
+        await requireRooftop(job.rooftopId, 'manager');
+        return sendJson(
+          response,
+          200,
+          await service.snoozePostingJob(job.id, {
+            minutes: body.minutes,
+            actor: body.actor ?? 'dealer-app'
+          })
+        );
       }
 
       if (request.method === 'GET' && pathname === '/api/leads') {
@@ -386,6 +491,33 @@ export function createHttpServer({ service = createDefaultService(), auth = crea
         const lead = await service.getLead(leadMatch.leadId);
         await requireRooftop(lead.rooftopId);
         return sendJson(response, 200, lead);
+      }
+
+      const leadDeliveryMatch = matchPath(pathname, '/api/leads/:leadId/notification-deliveries');
+      if (request.method === 'GET' && leadDeliveryMatch) {
+        const lead = await service.getLead(leadDeliveryMatch.leadId);
+        await requireRooftop(lead.rooftopId);
+        return sendJson(response, 200, await service.listNotificationDeliveries({ leadId: lead.id }));
+      }
+
+      const leadRetryMatch = matchPath(pathname, '/api/leads/:leadId/notifications/retry');
+      if (request.method === 'POST' && leadRetryMatch) {
+        const lead = await service.getLead(leadRetryMatch.leadId);
+        await requireRooftop(lead.rooftopId, 'manager');
+        return sendJson(response, 200, await service.retryFailedLeadNotifications(lead.id));
+      }
+
+      const leadEventMatch = matchPath(pathname, '/api/leads/:leadId/events');
+      if (request.method === 'POST' && leadEventMatch) {
+        const actor = await getActor();
+        const lead = await service.getLead(leadEventMatch.leadId);
+        await requireRooftop(lead.rooftopId);
+        const body = await readJson(request);
+        return sendJson(
+          response,
+          201,
+          await service.recordLeadEvent(lead.id, body.type, { ...(body.metadata ?? {}), actor: actor.id })
+        );
       }
 
       const leadAssignMatch = matchPath(pathname, '/api/leads/:leadId/assign');

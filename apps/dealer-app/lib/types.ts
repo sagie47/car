@@ -166,6 +166,62 @@ export type Listing = {
   events: ListingEvent[];
 };
 
+export type PostingAccount = {
+  id: string;
+  rooftopId: string;
+  platform: string;
+  label: string;
+  status: string;
+  dailyCapacity: number;
+  spacingMinutes: number;
+  autoSubmitEnabled: boolean;
+  settings: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PostingAttempt = {
+  id: string;
+  jobId: string;
+  status: string;
+  method: string;
+  startedAt: string;
+  completedAt: string | null;
+  result: Record<string, unknown>;
+  error: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export type PostingJob = {
+  id: string;
+  rooftopId: string;
+  listingId: string;
+  vehicleId: string;
+  accountId: string | null;
+  action: 'publish' | 'update' | 'remove' | string;
+  status: string;
+  priority: number;
+  scheduledFor: string;
+  claimedAt: string | null;
+  completedAt: string | null;
+  failedAt: string | null;
+  snoozedUntil: string | null;
+  liveUrl: string | null;
+  lastError: string | null;
+  complianceChecks: Array<{ key: string; ok: boolean; message: string }>;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  attempts: PostingAttempt[];
+};
+
+export type PostingPayload = {
+  job: PostingJob;
+  listing: Listing;
+  vehicle: Vehicle;
+  account: PostingAccount | null;
+};
+
 export type LeadEvent = {
   id: string;
   type: string;
@@ -195,6 +251,41 @@ export type Lead = {
   sourceMessage: string | null;
   externalId: string | null;
   events: LeadEvent[];
+};
+
+export type NotificationRecipient = {
+  id: string;
+  rooftopId: string;
+  userId: string | null;
+  channel: 'sms' | 'email';
+  destination: string;
+  label: string | null;
+  rules: {
+    sendWindow?: 'always' | 'business_hours';
+    timezone?: string;
+    businessHours?: {
+      days?: number[];
+      start?: string;
+      end?: string;
+    };
+    fallback?: boolean;
+  };
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NotificationDelivery = {
+  id: string;
+  leadId: string;
+  recipientId: string;
+  channel: 'sms' | 'email';
+  status: string;
+  attempts: number;
+  providerId: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type Health = {

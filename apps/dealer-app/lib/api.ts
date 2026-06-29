@@ -3,19 +3,27 @@ import type {
   Health,
   InventorySource,
   Lead,
+  NotificationDelivery,
+  NotificationRecipient,
   Listing,
+  PostingJob,
+  PostingPayload,
   Rooftop,
   RooftopDashboard,
   SyncRun,
   Vehicle
 } from './types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:3000';
+const CLIENT_API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, '');
+const SERVER_API_BASE_URL = (process.env.LOT_PILOT_API_BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
 
 type ApiError = Error & { syncRunId?: string | null };
 
 function buildUrl(path: string) {
-  return `${API_BASE_URL}${path}`;
+  if (typeof window !== 'undefined') {
+    return CLIENT_API_BASE_URL ? `${CLIENT_API_BASE_URL}${path}` : path;
+  }
+  return `${CLIENT_API_BASE_URL ?? SERVER_API_BASE_URL}${path}`;
 }
 
 async function getAccessToken() {
@@ -65,6 +73,29 @@ export async function getDealer(dealerId: string): Promise<Dealer> {
 
 export async function createDealer(payload: { name: string }) {
   return requestJson<Dealer>('/api/dealers', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function setupFromInventoryUrl(payload: { inventoryUrl: string }) {
+  return requestJson<{
+    dealer: Dealer;
+    rooftop: Rooftop;
+    inventorySource: InventorySource;
+    syncRun: SyncRun;
+    summary: {
+      createdVehicles: number;
+      updatedVehicles: number;
+      createdListings: number;
+      queuedForRemoval: number;
+    };
+    health: Health;
+    inferred: {
+      dealerName: string;
+      sourceUrl: string;
+    };
+  }>('/api/setup/inventory-url', {
     method: 'POST',
     body: JSON.stringify(payload)
   });
@@ -214,6 +245,74 @@ export async function recordListingActivity(listingId: string, type: 'copied' | 
   });
 }
 
+export async function listPostingJobs(options: {
+  rooftopId?: string | null;
+  status?: string | null;
+  active?: boolean;
+} = {}): Promise<PostingJob[]> {
+  const params = new URLSearchParams();
+  if (options.rooftopId) params.set('rooftopId', options.rooftopId);
+  if (options.status) params.set('status', options.status);
+  if (options.active !== undefined) params.set('active', String(options.active));
+
+  const query = params.toString() ? `?${params.toString()}` : '';
+  return requestJson<PostingJob[]>(`/api/posting-jobs${query}`);
+}
+
+export async function rebuildPostingQueue(rooftopId: string) {
+  return requestJson<{
+    account: {
+      id: string;
+      label: string;
+      platform: string;
+      dailyCapacity: number;
+      spacingMinutes: number;
+      autoSubmitEnabled: boolean;
+    };
+    createdJobs: PostingJob[];
+    blockedJobs: PostingJob[];
+    existingActiveJobs: PostingJob[];
+  }>(`/api/rooftops/${rooftopId}/posting-jobs/rebuild`, {
+    method: 'POST',
+    body: JSON.stringify({ actor: 'dealer-app' })
+  });
+}
+
+export async function claimPostingJob(jobId: string) {
+  return requestJson<PostingPayload>(`/api/posting-jobs/${jobId}/claim`, {
+    method: 'POST',
+    body: JSON.stringify({ actor: 'dealer-app' })
+  });
+}
+
+export async function claimNextPostingJob(rooftopId?: string | null) {
+  return requestJson<PostingPayload>('/api/posting-jobs/claim-next', {
+    method: 'POST',
+    body: JSON.stringify({ rooftopId, actor: 'dealer-app' })
+  });
+}
+
+export async function completePostingJob(jobId: string, payload: Record<string, unknown>) {
+  return requestJson<PostingPayload>(`/api/posting-jobs/${jobId}/complete`, {
+    method: 'POST',
+    body: JSON.stringify({ ...payload, actor: 'dealer-app' })
+  });
+}
+
+export async function failPostingJob(jobId: string, payload: Record<string, unknown>) {
+  return requestJson<PostingPayload>(`/api/posting-jobs/${jobId}/fail`, {
+    method: 'POST',
+    body: JSON.stringify({ ...payload, actor: 'dealer-app' })
+  });
+}
+
+export async function snoozePostingJob(jobId: string, minutes = 60) {
+  return requestJson<PostingPayload>(`/api/posting-jobs/${jobId}/snooze`, {
+    method: 'POST',
+    body: JSON.stringify({ minutes, actor: 'dealer-app' })
+  });
+}
+
 export async function listLeads(options: { rooftopId?: string | null; status?: string | null } = {}) {
   const params = new URLSearchParams();
   if (options.rooftopId) params.set('rooftopId', options.rooftopId);
@@ -244,5 +343,72 @@ export async function updateLeadStatus(leadId: string, status: string, actor = '
       status,
       actor
     })
+  });
+}
+
+export async function createLead(payload: {
+  rooftopId: string;
+  vehicleId: string;
+  sourceChannel: string;
+  sourceSubchannel?: string | null;
+  contactName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  sourceMessage?: string | null;
+}) {
+  return requestJson<Lead>('/api/leads', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function listNotificationRecipients(rooftopId: string) {
+  return requestJson<NotificationRecipient[]>(`/api/rooftops/${rooftopId}/notification-recipients`);
+}
+
+export async function createNotificationRecipient(
+  rooftopId: string,
+  payload: {
+    channel: 'sms' | 'email';
+    destination: string;
+    label?: string | null;
+    rules?: NotificationRecipient['rules'];
+    isActive?: boolean;
+  }
+) {
+  return requestJson<NotificationRecipient>(`/api/rooftops/${rooftopId}/notification-recipients`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateNotificationRecipient(
+  recipientId: string,
+  payload: {
+    label?: string | null;
+    rules?: NotificationRecipient['rules'];
+    isActive?: boolean;
+  }
+) {
+  return requestJson<NotificationRecipient>(`/api/notification-recipients/${recipientId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function listLeadNotificationDeliveries(leadId: string) {
+  return requestJson<NotificationDelivery[]>(`/api/leads/${leadId}/notification-deliveries`);
+}
+
+export async function retryLeadNotifications(leadId: string) {
+  return requestJson<NotificationDelivery[]>(`/api/leads/${leadId}/notifications/retry`, {
+    method: 'POST'
+  });
+}
+
+export async function recordLeadEvent(leadId: string, type: string, metadata: Record<string, unknown>) {
+  return requestJson<Lead>(`/api/leads/${leadId}/events`, {
+    method: 'POST',
+    body: JSON.stringify({ type, metadata })
   });
 }

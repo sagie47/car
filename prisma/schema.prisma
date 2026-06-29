@@ -89,6 +89,8 @@ model Rooftop {
   leads          Lead[]
   accessGrants   RooftopAccess[]
   recipients     NotificationRecipient[]
+  postingAccounts PostingAccount[]
+  postingJobs     PostingJob[]
 
   @@index([dealerId])
 }
@@ -210,8 +212,72 @@ model Listing {
   vehicle   Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
   rooftop   Rooftop        @relation(fields: [rooftopId], references: [id], onDelete: Cascade)
   events    ListingEvent[]
+  postingJobs PostingJob[]
 
   @@index([rooftopId])
+}
+
+model PostingAccount {
+  id                String       @id
+  rooftopId         String
+  platform          String
+  label             String
+  status            String
+  dailyCapacity     Int
+  spacingMinutes    Int
+  autoSubmitEnabled Boolean
+  settings          Json
+  createdAt         DateTime
+  updatedAt         DateTime
+  rooftop           Rooftop      @relation(fields: [rooftopId], references: [id], onDelete: Cascade)
+  postingJobs       PostingJob[]
+
+  @@index([rooftopId])
+}
+
+model PostingJob {
+  id               String           @id
+  rooftopId        String
+  listingId        String
+  vehicleId        String
+  accountId        String?
+  action           String
+  status           String
+  priority         Int
+  scheduledFor     DateTime
+  claimedAt        DateTime?
+  completedAt      DateTime?
+  failedAt         DateTime?
+  snoozedUntil     DateTime?
+  liveUrl          String?
+  lastError        String?
+  complianceChecks Json
+  metadata         Json
+  createdAt        DateTime
+  updatedAt        DateTime
+  rooftop          Rooftop          @relation(fields: [rooftopId], references: [id], onDelete: Cascade)
+  listing          Listing          @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  account          PostingAccount?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  attempts         PostingAttempt[]
+
+  @@index([rooftopId])
+  @@index([listingId])
+  @@index([status, scheduledFor])
+}
+
+model PostingAttempt {
+  id          String     @id
+  jobId       String
+  status      String
+  method      String
+  startedAt   DateTime
+  completedAt DateTime?
+  result      Json
+  error       String?
+  metadata    Json
+  job         PostingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, startedAt])
 }
 
 model ListingEvent {
@@ -277,6 +343,8 @@ model NotificationRecipient {
   userId    String?
   channel   String
   destination String
+  label     String?
+  rules     Json?
   isActive  Boolean
   createdAt DateTime
   updatedAt DateTime

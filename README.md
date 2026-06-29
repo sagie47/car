@@ -36,7 +36,7 @@ product wedge:
 - Eligibility evaluation and rooftop health scoring.
 - Listing draft generation, Marketplace review/copy, browser autofill helper,
   and listing-state transitions.
-- Basic lead creation, assignment, and status tracking.
+- Basic lead creation, assignment, alert delivery, reply templates, and status tracking.
 - JSON API for local development.
 - Postgres persistence for dealers, rooftops, sync runs, vehicles, snapshots,
   listings, listing events, leads, and lead events.
@@ -79,6 +79,9 @@ named `lotpilot` and use the same connection URLs from `.env.example`.
 - `GET /api/rooftops?dealerId=...`
 - `GET /api/rooftops/:rooftopId`
 - `GET /api/rooftops/:rooftopId/dashboard`
+- `GET /api/rooftops/:rooftopId/notification-recipients`
+- `POST /api/rooftops/:rooftopId/notification-recipients`
+- `PATCH /api/notification-recipients/:recipientId`
 - `POST /api/inventory-sources`
 - `GET /api/inventory-sources?rooftopId=...`
 - `GET /api/inventory-sources/:inventorySourceId`
@@ -95,6 +98,10 @@ named `lotpilot` and use the same connection URLs from `.env.example`.
 - `GET /api/leads/:leadId`
 - `PATCH /api/leads/:leadId/assign`
 - `PATCH /api/leads/:leadId/status`
+- `GET /api/leads/:leadId/notification-deliveries`
+- `POST /api/leads/:leadId/notifications/retry`
+- `POST /api/leads/:leadId/events`
+- `POST /api/webhooks/resend/inbound`
 
 ## Dealer app surfaces
 
@@ -107,6 +114,10 @@ named `lotpilot` and use the same connection URLs from `.env.example`.
 - `/reports`
 - `/settings`
 - `/assignments`
+
+Lead alert recipients, inbound lead alias guidance, and manual lead capture are
+available from `/settings` and `/leads`. Lead detail pages show alert delivery
+history, retry failed alerts, and copyable response templates.
 
 ## Chrome autofill extension
 

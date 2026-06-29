@@ -21,7 +21,12 @@
 
       <label>
         <span>Listing ID</span>
-        <input id="listingId" placeholder="listing_...">
+        <input id="listingId" placeholder="Optional: listing_...; blank uses latest draft">
+      </label>
+
+      <label>
+        <span>Rooftop ID</span>
+        <input id="rooftopId" placeholder="Optional: rooftop_...; used by Run Next Job">
       </label>
 
       <label>
@@ -31,13 +36,14 @@
 
       <div class="button-row">
         <button id="loadListing" type="button">Load</button>
-        <button id="postAssist" type="button" class="primary">Post Assist</button>
+        <button id="postAssist" type="button" class="primary">Post Vehicle</button>
+        <button id="runNextJob" type="button" class="primary">Run Next Job</button>
       </div>
 
       <section id="preview" class="preview" hidden></section>
 
       <div class="button-grid">
-        <button id="fillText" type="button">Fill Text</button>
+        <button id="fillText" type="button">Fill Vehicle Fields</button>
         <button id="uploadPhotos" type="button">Auto Upload Photos</button>
         <button id="downloadPhotos" type="button">Download Photos</button>
         <button id="clearToken" type="button" class="secondary">Clear Token</button>

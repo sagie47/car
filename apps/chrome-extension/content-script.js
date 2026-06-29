@@ -5,7 +5,7 @@
   const FIELD_TYPES = {
     title: {
       keywords: ['title', 'listing title', 'vehicle title', 'what are you selling'],
-      reject: ['subtitle'],
+      reject: ['subtitle', 'title status'],
       prefer: ['input', '[role="textbox"]', '[contenteditable="true"]']
     },
     price: {
@@ -17,6 +17,61 @@
       keywords: ['description', 'details', 'seller notes', 'body', 'message', 'tell buyers'],
       reject: ['title'],
       prefer: ['textarea', '[contenteditable="true"]', '[role="textbox"]']
+    },
+    year: {
+      keywords: ['year', 'vehicle year', 'model year'],
+      reject: ['years', 'yearly'],
+      prefer: ['input', 'select', '[role="combobox"]']
+    },
+    make: {
+      keywords: ['make', 'vehicle make'],
+      reject: [],
+      prefer: ['input', 'select', '[role="combobox"]']
+    },
+    model: {
+      keywords: ['model', 'vehicle model'],
+      reject: ['model year'],
+      prefer: ['input', 'select', '[role="combobox"]']
+    },
+    mileage: {
+      keywords: ['mileage', 'odometer', 'kilometers', 'kilometres'],
+      reject: [],
+      prefer: ['input']
+    },
+    condition: {
+      keywords: ['condition', 'vehicle condition'],
+      reject: [],
+      prefer: ['select', '[role="combobox"]', 'input']
+    },
+    bodyStyle: {
+      keywords: ['body style', 'body type', 'vehicle type'],
+      reject: [],
+      prefer: ['select', '[role="combobox"]', 'input']
+    },
+    exteriorColor: {
+      keywords: ['exterior color', 'exterior colour', 'color', 'colour'],
+      reject: ['interior'],
+      prefer: ['select', '[role="combobox"]', 'input']
+    },
+    interiorColor: {
+      keywords: ['interior color', 'interior colour'],
+      reject: ['exterior'],
+      prefer: ['select', '[role="combobox"]', 'input']
+    },
+    transmission: {
+      keywords: ['transmission', 'transmission type'],
+      reject: [],
+      prefer: ['select', '[role="combobox"]', 'input']
+    },
+    fuelType: {
+      keywords: ['fuel type', 'fuel'],
+      reject: [],
+      prefer: ['select', '[role="combobox"]', 'input']
+    },
+    drivetrain: {
+      keywords: ['drivetrain', 'drive type', 'drive train'],
+      reject: [],
+      prefer: ['select', '[role="combobox"]', 'input']
     }
   };
 
@@ -29,9 +84,11 @@
   }
 
   function isEditable(element) {
+    if (element.tagName === 'SELECT') return true;
     if (element.isContentEditable) return true;
     if (element.tagName === 'TEXTAREA') return true;
     if (element.getAttribute('role') === 'textbox') return true;
+    if (element.getAttribute('role') === 'combobox') return true;
     if (element.tagName !== 'INPUT') return false;
     return !['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(element.type);
   }
@@ -90,12 +147,14 @@
     if (element.placeholder) score += 2;
     if (type === 'description' && (tag === 'textarea' || element.isContentEditable)) score += 12;
     if (type === 'price' && element.tagName === 'INPUT' && ['number', 'text', 'tel', ''].includes(element.type)) score += 8;
+    if (element.tagName === 'SELECT') score += 8;
+    if (element.getAttribute('role') === 'combobox') score += 6;
     if (isFacebook() && element.getAttribute('role') === 'textbox') score += 4;
     return score;
   }
 
   function candidates() {
-    return Array.from(document.querySelectorAll('input, textarea, [contenteditable="true"], [role="textbox"], [aria-label]'))
+    return Array.from(document.querySelectorAll('input, textarea, select, [contenteditable="true"], [role="textbox"], [role="combobox"], [aria-label]'))
       .filter((element) => isEditable(element) && isVisible(element));
   }
 
@@ -115,8 +174,28 @@
     return null;
   }
 
+  function normalizedOption(value) {
+    return normalize(value).replace(/[^a-z0-9]/g, '');
+  }
+
+  function selectNativeOption(select, value) {
+    const desired = normalizedOption(value);
+    const option = Array.from(select.options).find((item) => {
+      const optionText = normalizedOption(`${item.textContent} ${item.value}`);
+      return optionText === desired || optionText.includes(desired) || desired.includes(optionText);
+    });
+    if (!option) return false;
+    select.value = option.value;
+    select.dispatchEvent(new Event('input', { bubbles: true }));
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+
   function setNativeValue(element, value) {
     element.focus();
+    if (element.tagName === 'SELECT') {
+      return selectNativeOption(element, value);
+    }
     if (element.isContentEditable) {
       const selection = window.getSelection();
       const range = document.createRange();
@@ -130,27 +209,46 @@
       return;
     }
 
+    if (element.getAttribute('role') === 'combobox' && element.tagName !== 'INPUT') {
+      element.click();
+      element.textContent = value;
+      element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }
+
     const prototype = Object.getPrototypeOf(element);
     const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
     if (descriptor?.set) descriptor.set.call(element, value);
     else element.value = value;
     element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
     element.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
   }
 
   function fillMarketplace(payload) {
     const values = {
       title: payload.title ?? '',
       price: payload.price ?? '',
-      description: payload.description ?? ''
+      description: payload.description ?? '',
+      year: payload.vehicle?.year ?? '',
+      make: payload.vehicle?.make ?? '',
+      model: payload.vehicle?.model ?? '',
+      mileage: payload.vehicle?.mileage ?? '',
+      condition: payload.vehicle?.condition ?? '',
+      bodyStyle: payload.vehicle?.bodyStyle ?? '',
+      exteriorColor: payload.vehicle?.exteriorColor ?? '',
+      interiorColor: payload.vehicle?.interiorColor ?? '',
+      transmission: payload.vehicle?.transmission ?? '',
+      fuelType: payload.vehicle?.fuelType ?? '',
+      drivetrain: payload.vehicle?.drivetrain ?? ''
     };
     const used = new Set();
     const filledFields = [];
     const missingFields = [];
 
-    for (const type of ['title', 'price', 'description']) {
+    for (const type of ['title', 'price', 'year', 'make', 'model', 'mileage', 'condition', 'bodyStyle', 'exteriorColor', 'interiorColor', 'transmission', 'fuelType', 'drivetrain', 'description']) {
       if (!values[type]) {
-        missingFields.push(type);
         continue;
       }
       const field = findField(type, used);
@@ -159,8 +257,11 @@
         continue;
       }
       used.add(field);
-      setNativeValue(field, values[type]);
-      filledFields.push(type);
+      if (setNativeValue(field, values[type]) !== false) {
+        filledFields.push(type);
+      } else {
+        missingFields.push(type);
+      }
     }
 
     return {
@@ -299,6 +400,68 @@
     };
   }
 
+  function buttonText(element) {
+    return normalize([
+      element.getAttribute('aria-label'),
+      element.getAttribute('title'),
+      element.textContent
+    ].filter(Boolean).join(' '));
+  }
+
+  function clickableButtons() {
+    return Array.from(document.querySelectorAll('button, [role="button"], a[role="button"], [aria-label]'))
+      .filter((element) => isVisible(element) && !element.disabled && element.getAttribute('aria-disabled') !== 'true');
+  }
+
+  function findButtonByLabels(labels) {
+    return clickableButtons().find((element) => {
+      const text = buttonText(element);
+      return labels.some((label) => text === label || text.includes(label));
+    }) ?? null;
+  }
+
+  function wait(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  }
+
+  async function submitMarketplace(payload = {}) {
+    const clickedButtons = [];
+    const maxClicks = Number(payload.maxSubmitClicks ?? 4);
+
+    for (let index = 0; index < maxClicks; index += 1) {
+      const finalButton = findButtonByLabels(['publish', 'post', 'list', 'submit']);
+      if (finalButton) {
+        const label = buttonText(finalButton) || 'publish';
+        finalButton.click();
+        clickedButtons.push(label);
+        await wait(1200);
+        return {
+          target: payload.target ?? 'facebook_marketplace',
+          submitted: true,
+          clickedButtons,
+          liveUrl: location.href
+        };
+      }
+
+      const nextButton = findButtonByLabels(['next', 'continue', 'done']);
+      if (!nextButton) break;
+      const label = buttonText(nextButton) || 'next';
+      nextButton.click();
+      clickedButtons.push(label);
+      await wait(900);
+    }
+
+    return {
+      target: payload.target ?? 'facebook_marketplace',
+      submitted: false,
+      clickedButtons,
+      liveUrl: location.href,
+      error: clickedButtons.length
+        ? 'The extension advanced the form but did not find a final publish/post button.'
+        : 'No visible Marketplace publish, post, or next button was found.'
+    };
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === 'LOTPILOT_AUTOFILL_MARKETPLACE') {
       try {
@@ -327,6 +490,19 @@
         });
       }
       return false;
+    }
+
+    if (message?.type === 'LOTPILOT_SUBMIT_MARKETPLACE') {
+      submitMarketplace(message.payload ?? {})
+        .then(sendResponse)
+        .catch((error) => sendResponse({
+          target: message.payload?.target ?? 'facebook_marketplace',
+          submitted: false,
+          clickedButtons: [],
+          liveUrl: location.href,
+          error: error instanceof Error ? error.message : 'Unknown submit error.'
+        }));
+      return true;
     }
 
     return false;

@@ -62,10 +62,12 @@ export function StatGrid({
 
 export function DataTable({
   columns,
-  rows
+  rows,
+  emptyLabel = 'No records yet.'
 }: {
   columns: string[];
   rows: ReactNode[][];
+  emptyLabel?: string;
 }) {
   return (
     <div className="table-wrap">
@@ -78,13 +80,19 @@ export function DataTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, rowIndex) => (
-            <tr key={rowIndex}>
-              {row.map((cell, cellIndex) => (
-                <td key={cellIndex}>{cell}</td>
-              ))}
+          {rows.length ? (
+            rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {row.map((cell, cellIndex) => (
+                  <td key={cellIndex}>{cell}</td>
+                ))}
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td colSpan={columns.length} className="muted">{emptyLabel}</td>
             </tr>
-          ))}
+          )}
         </tbody>
       </table>
     </div>

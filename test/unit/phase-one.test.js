@@ -67,6 +67,27 @@ test('website inventory source uses the Firecrawl adapter and persists a sync re
   assert.equal(result.inventorySource.sourceConfig.lastExtraction.detailPageCount, 1);
 });
 
+test('setup from inventory URL infers dealer location and runs the first sync', async () => {
+  const service = new LotPilotService({
+    store: new InMemoryStore(),
+    inventoryAdapter: {
+      async importInventory() {
+        return { vehicles: [vehicle()], raw: { detailPageCount: 1 } };
+      }
+    }
+  });
+
+  const result = await service.setupFromInventoryUrl({
+    inventoryUrl: 'https://eliteautocentre.ca/used/RAM-3500.html'
+  });
+
+  assert.equal(result.dealer.name, 'Elite Auto Centre');
+  assert.equal(result.rooftop.name, 'Elite Auto Centre');
+  assert.equal(result.inventorySource.type, 'website_inventory_url');
+  assert.equal(result.syncRun.rowsImported, 1);
+  assert.equal((await service.listListings({ rooftopId: result.rooftop.id })).length, 1);
+});
+
 test('Firecrawl adapter follows detail pages when inventory cards are partial', async () => {
   const calls = [];
   const adapter = createFirecrawlInventoryAdapter({
@@ -126,6 +147,151 @@ test('Firecrawl adapter follows detail pages when inventory cards are partial', 
   assert.equal(result.vehicles.length, 1);
   assert.equal(result.vehicles[0].vin, '4T1G11AK1MU000001');
   assert.equal(result.vehicles[0].price, 24995);
+});
+
+test('Firecrawl adapter discovers inventory pages from a dealer homepage', async () => {
+  const calls = [];
+  const adapter = createFirecrawlInventoryAdapter({
+    apiKey: 'test_key',
+    async fetchImpl(_endpoint, request) {
+      const body = JSON.parse(request.body);
+      calls.push(body.url);
+      if (body.url === 'https://dealer.example/') {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            data: {
+              sourceUrl: body.url,
+              html: '<html><title>Dealer Home</title></html>',
+              links: ['https://dealer.example/used/search.html']
+            }
+          })
+        };
+      }
+      if (body.url === 'https://dealer.example/used/search.html') {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            data: {
+              sourceUrl: body.url,
+              links: [
+                'https://dealer.example/used/2020-Honda-Accord-id123.html',
+                'https://dealer.example/used/2020-Honda-Accord-id123.html?show_video=1'
+              ]
+            }
+          })
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            sourceUrl: body.url,
+            html: `
+              <title>2020 Honda Accord Sport $23,995</title>
+              <input type="hidden" name="vin" value="1HGCV1F30LA000001">
+              <input type="hidden" name="year" value="2020">
+              <input type="hidden" name="make" value="Honda">
+              <input type="hidden" name="model" value="Accord">
+              <input type="hidden" name="trim" value="Sport">
+              <input type="hidden" name="price" value="23995">
+              https://imagescdn.d2cmedia.ca/vehicle-one.jpg
+            `
+          }
+        })
+      };
+    }
+  });
+
+  const result = await adapter.importInventory('https://dealer.example/');
+
+  assert.equal(result.vehicles.length, 1);
+  assert.equal(result.vehicles[0].vin, '1HGCV1F30LA000001');
+  assert.equal(result.raw.discoveredInventoryPageUrls[0], 'https://dealer.example/used/search.html');
+  assert.deepEqual(calls, [
+    'https://dealer.example/',
+    'https://dealer.example/used/search.html',
+    'https://dealer.example/used/2020-Honda-Accord-id123.html'
+  ]);
+});
+
+test('Firecrawl adapter parses Hillz rendered vehicle detail pages', async () => {
+  const calls = [];
+  const adapter = createFirecrawlInventoryAdapter({
+    apiKey: 'test_key',
+    async fetchImpl(_endpoint, request) {
+      const body = JSON.parse(request.body);
+      calls.push(body.url);
+      if (body.url === 'https://dealer.example/') {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            data: {
+              sourceUrl: body.url,
+              links: ['https://dealer.example/cars']
+            }
+          })
+        };
+      }
+      if (body.url === 'https://dealer.example/cars') {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            data: {
+              sourceUrl: body.url,
+              links: ['https://dealer.example/cars/used/2016-chrysler-200-586523']
+            }
+          })
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            sourceUrl: body.url,
+            html: `
+              <span data-cg-vin="1C3CCCAB2GN158699" data-cg-price="12977"></span>
+              <span class="DetaileProductCustomrWeb-title">2016 Chrysler</span>
+              <span class="DetaileProductCustomrWeb-subtitle">&nbsp; 200 4dr Sdn Limited FWD</span>
+              <div class="vehicle_single_detail_div__container"><span>Year</span><span>2016</span></div>
+              <div class="vehicle_single_detail_div__container"><span>Make</span><span>Chrysler</span></div>
+              <div class="vehicle_single_detail_div__container"><span>Model</span><span>200</span></div>
+              <div class="vehicle_single_detail_div__container"><span>Body Style</span><span>Sedan</span></div>
+              <div class="vehicle_single_detail_div__container"><span>Odometer</span><span>119,099 KM</span></div>
+              <div class="vehicle_single_detail_div__container"><span>Transmission</span><span>Automatic</span></div>
+              <div class="vehicle_single_detail_div__container"><span>Drivetrain</span><span>FWD</span></div>
+              <div class="vehicle_single_detail_div__container"><span>VIN</span><span>1C3CCCAB2GN158699</span></div>
+              <div class="vehicle_single_detail_div__container"><span>Stock</span><span>4542-1</span></div>
+              <img src="https://image123.azureedge.net/dealer/2016-Chrysler-200-one.jpg">
+              <img src="https://image123.azureedge.net/dealer/2017-GMC-Sierra3500HD-other.jpg">
+            `
+          }
+        })
+      };
+    }
+  });
+
+  const result = await adapter.importInventory('https://dealer.example/');
+
+  assert.deepEqual(calls, [
+    'https://dealer.example/',
+    'https://dealer.example/cars',
+    'https://dealer.example/cars/used/2016-chrysler-200-586523'
+  ]);
+  assert.equal(result.vehicles.length, 1);
+  assert.equal(result.vehicles[0].vin, '1C3CCCAB2GN158699');
+  assert.equal(result.vehicles[0].stockNumber, '4542-1');
+  assert.equal(result.vehicles[0].mileage, 119099);
+  assert.equal(result.vehicles[0].bodyStyle, 'Sedan');
+  assert.deepEqual(result.vehicles[0].photoUrls, ['https://image123.azureedge.net/dealer/2016-Chrysler-200-one.jpg']);
 });
 
 test('Firecrawl adapter can authenticate to a secured self-hosted proxy with Basic Auth', async () => {
@@ -217,4 +383,74 @@ test('new leads create notification delivery records for active recipients', asy
   assert.equal(calls.length, 1);
   assert.equal(deliveries[0].status, 'sent');
   assert.equal(deliveries[0].providerId, 'provider_123');
+});
+
+test('posting queue rebuild creates a pending publish job for ready listings', async () => {
+  const { service, rooftop } = await context();
+  await service.ingestInventory({ rooftopId: rooftop.id, vehicles: [vehicle()] });
+
+  const result = await service.rebuildPostingQueue(rooftop.id, { actor: 'test' });
+  const [job] = result.createdJobs;
+  const [listing] = await service.listListings({ rooftopId: rooftop.id });
+
+  assert.equal(result.account.platform, 'facebook_marketplace');
+  assert.equal(result.account.dailyCapacity, 25);
+  assert.equal(result.account.autoSubmitEnabled, true);
+  assert.equal(job.action, 'publish');
+  assert.equal(job.status, 'pending');
+  assert.equal(listing.state, 'queued_for_publish');
+});
+
+test('posting queue blocks jobs that fail Marketplace readiness checks', async () => {
+  const { service, rooftop } = await context();
+  await service.ingestInventory({ rooftopId: rooftop.id, vehicles: [vehicle()] });
+  const [listing] = await service.listListings({ rooftopId: rooftop.id });
+  const storedVehicle = await service.getVehicle(listing.vehicleId);
+  await service.store.saveVehicle({ ...storedVehicle, price: null, photoUrls: [], updatedAt: new Date().toISOString() });
+
+  const result = await service.rebuildPostingQueue(rooftop.id, { actor: 'test' });
+  const [job] = result.blockedJobs;
+
+  assert.equal(result.createdJobs.length, 0);
+  assert.equal(job.status, 'blocked');
+  assert.equal(job.complianceChecks.some((check) => check.key === 'has_price' && !check.ok), true);
+});
+
+test('posting job claim and completion records an attempt and publishes listing', async () => {
+  const { service, rooftop } = await context();
+  await service.ingestInventory({ rooftopId: rooftop.id, vehicles: [vehicle()] });
+  const result = await service.rebuildPostingQueue(rooftop.id, { actor: 'test' });
+  const claimed = await service.claimPostingJob(result.createdJobs[0].id, { actor: 'extension_test' });
+
+  assert.equal(claimed.job.status, 'claimed');
+  assert.equal(claimed.listing.state, 'publish_in_progress');
+
+  const completed = await service.completePostingJob(
+    claimed.job.id,
+    { liveUrl: 'https://www.facebook.com/marketplace/item/123', result: { submitted: true } },
+    { actor: 'extension_test' }
+  );
+  const attempts = await service.store.listPostingAttempts({ jobId: claimed.job.id });
+
+  assert.equal(completed.job.status, 'completed');
+  assert.equal(completed.job.liveUrl, 'https://www.facebook.com/marketplace/item/123');
+  assert.equal(completed.listing.state, 'published');
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0].status, 'completed');
+});
+
+test('posting queue creates remove jobs when live inventory becomes unavailable', async () => {
+  const { service, rooftop } = await context();
+  await service.ingestInventory({ rooftopId: rooftop.id, vehicles: [vehicle()] });
+  await service.rebuildPostingQueue(rooftop.id, { actor: 'test' });
+  const [listing] = await service.listListings({ rooftopId: rooftop.id });
+  await service.transitionListing(listing.id, 'publish_in_progress', { actor: 'test' });
+  await service.transitionListing(listing.id, 'published', { actor: 'test' });
+
+  await service.ingestInventory({ rooftopId: rooftop.id, vehicles: [vehicle({ status: 'sold' })] });
+  const result = await service.rebuildPostingQueue(rooftop.id, { actor: 'test' });
+  const removeJob = result.createdJobs.find((job) => job.action === 'remove');
+
+  assert.ok(removeJob);
+  assert.equal(removeJob.status, 'pending');
 });

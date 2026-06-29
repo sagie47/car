@@ -206,6 +206,67 @@ function mapListing(record) {
   };
 }
 
+function mapPostingAccount(record) {
+  return record
+    ? {
+        id: record.id,
+        rooftopId: record.rooftopId,
+        platform: record.platform,
+        label: record.label,
+        status: record.status,
+        dailyCapacity: record.dailyCapacity,
+        spacingMinutes: record.spacingMinutes,
+        autoSubmitEnabled: record.autoSubmitEnabled,
+        settings: cloneJson(record.settings, {}),
+        createdAt: record.createdAt.toISOString(),
+        updatedAt: record.updatedAt.toISOString()
+      }
+    : null;
+}
+
+function mapPostingAttempt(record) {
+  return record
+    ? {
+        id: record.id,
+        jobId: record.jobId,
+        status: record.status,
+        method: record.method,
+        startedAt: record.startedAt.toISOString(),
+        completedAt: record.completedAt?.toISOString() ?? null,
+        result: cloneJson(record.result, {}),
+        error: record.error,
+        metadata: cloneJson(record.metadata, {})
+      }
+    : null;
+}
+
+function mapPostingJob(record) {
+  return record
+    ? {
+        id: record.id,
+        rooftopId: record.rooftopId,
+        listingId: record.listingId,
+        vehicleId: record.vehicleId,
+        accountId: record.accountId,
+        action: record.action,
+        status: record.status,
+        priority: record.priority,
+        scheduledFor: record.scheduledFor.toISOString(),
+        claimedAt: record.claimedAt?.toISOString() ?? null,
+        completedAt: record.completedAt?.toISOString() ?? null,
+        failedAt: record.failedAt?.toISOString() ?? null,
+        snoozedUntil: record.snoozedUntil?.toISOString() ?? null,
+        liveUrl: record.liveUrl,
+        lastError: record.lastError,
+        complianceChecks: cloneJson(record.complianceChecks, []),
+        metadata: cloneJson(record.metadata, {}),
+        createdAt: record.createdAt.toISOString(),
+        updatedAt: record.updatedAt.toISOString(),
+        attempts: (record.attempts ?? []).map(mapPostingAttempt)
+      }
+    : null;
+}
+
 function mapLead(record) {
   if (!record) {
     return null;
@@ -249,6 +310,8 @@ function mapNotificationRecipient(record) {
         userId: record.userId,
         channel: record.channel,
         destination: record.destination,
+        label: record.label,
+        rules: cloneJson(record.rules, {}),
         isActive: record.isActive,
         createdAt: record.createdAt.toISOString(),
         updatedAt: record.updatedAt.toISOString()
@@ -848,6 +911,174 @@ export class PrismaStore extends LotPilotStore {
     return records.map(mapListing);
   }
 
+  async savePostingAccount(account) {
+    const record = await this.client.postingAccount.upsert({
+      where: { id: account.id },
+      update: {
+        rooftopId: account.rooftopId,
+        platform: account.platform,
+        label: account.label,
+        status: account.status,
+        dailyCapacity: account.dailyCapacity,
+        spacingMinutes: account.spacingMinutes,
+        autoSubmitEnabled: Boolean(account.autoSubmitEnabled),
+        settings: cloneJson(account.settings, {}),
+        createdAt: new Date(account.createdAt),
+        updatedAt: new Date(account.updatedAt)
+      },
+      create: {
+        id: account.id,
+        rooftopId: account.rooftopId,
+        platform: account.platform,
+        label: account.label,
+        status: account.status,
+        dailyCapacity: account.dailyCapacity,
+        spacingMinutes: account.spacingMinutes,
+        autoSubmitEnabled: Boolean(account.autoSubmitEnabled),
+        settings: cloneJson(account.settings, {}),
+        createdAt: new Date(account.createdAt),
+        updatedAt: new Date(account.updatedAt)
+      }
+    });
+    return mapPostingAccount(record);
+  }
+
+  async getPostingAccount(accountId) {
+    return mapPostingAccount(await this.client.postingAccount.findUnique({ where: { id: accountId } }));
+  }
+
+  async listPostingAccounts({ rooftopId, status } = {}) {
+    const records = await this.client.postingAccount.findMany({
+      where: {
+        ...(rooftopId ? { rooftopId } : {}),
+        ...(status ? { status } : {})
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+    return records.map(mapPostingAccount);
+  }
+
+  async savePostingJob(job) {
+    const record = await this.client.postingJob.upsert({
+      where: { id: job.id },
+      update: {
+        rooftopId: job.rooftopId,
+        listingId: job.listingId,
+        vehicleId: job.vehicleId,
+        accountId: toNullable(job.accountId),
+        action: job.action,
+        status: job.status,
+        priority: job.priority,
+        scheduledFor: new Date(job.scheduledFor),
+        claimedAt: job.claimedAt ? new Date(job.claimedAt) : null,
+        completedAt: job.completedAt ? new Date(job.completedAt) : null,
+        failedAt: job.failedAt ? new Date(job.failedAt) : null,
+        snoozedUntil: job.snoozedUntil ? new Date(job.snoozedUntil) : null,
+        liveUrl: toNullable(job.liveUrl),
+        lastError: toNullable(job.lastError),
+        complianceChecks: cloneJson(job.complianceChecks, []),
+        metadata: cloneJson(job.metadata, {}),
+        createdAt: new Date(job.createdAt),
+        updatedAt: new Date(job.updatedAt)
+      },
+      create: {
+        id: job.id,
+        rooftopId: job.rooftopId,
+        listingId: job.listingId,
+        vehicleId: job.vehicleId,
+        accountId: toNullable(job.accountId),
+        action: job.action,
+        status: job.status,
+        priority: job.priority,
+        scheduledFor: new Date(job.scheduledFor),
+        claimedAt: job.claimedAt ? new Date(job.claimedAt) : null,
+        completedAt: job.completedAt ? new Date(job.completedAt) : null,
+        failedAt: job.failedAt ? new Date(job.failedAt) : null,
+        snoozedUntil: job.snoozedUntil ? new Date(job.snoozedUntil) : null,
+        liveUrl: toNullable(job.liveUrl),
+        lastError: toNullable(job.lastError),
+        complianceChecks: cloneJson(job.complianceChecks, []),
+        metadata: cloneJson(job.metadata, {}),
+        createdAt: new Date(job.createdAt),
+        updatedAt: new Date(job.updatedAt)
+      },
+      include: {
+        attempts: {
+          orderBy: { startedAt: 'asc' }
+        }
+      }
+    });
+    return mapPostingJob(record);
+  }
+
+  async getPostingJob(jobId) {
+    return mapPostingJob(
+      await this.client.postingJob.findUnique({
+        where: { id: jobId },
+        include: {
+          attempts: {
+            orderBy: { startedAt: 'asc' }
+          }
+        }
+      })
+    );
+  }
+
+  async listPostingJobs({ rooftopId, listingId, status, active } = {}) {
+    const activeStatuses = ['pending', 'blocked', 'claimed', 'in_progress', 'needs_manual_review'];
+    const records = await this.client.postingJob.findMany({
+      where: {
+        ...(rooftopId ? { rooftopId } : {}),
+        ...(listingId ? { listingId } : {}),
+        ...(status ? { status } : {}),
+        ...(active === undefined ? {} : { status: active ? { in: activeStatuses } : { notIn: activeStatuses } })
+      },
+      orderBy: [{ scheduledFor: 'asc' }, { priority: 'desc' }],
+      include: {
+        attempts: {
+          orderBy: { startedAt: 'asc' }
+        }
+      }
+    });
+    return records.map(mapPostingJob);
+  }
+
+  async savePostingAttempt(attempt) {
+    const record = await this.client.postingAttempt.upsert({
+      where: { id: attempt.id },
+      update: {
+        jobId: attempt.jobId,
+        status: attempt.status,
+        method: attempt.method,
+        startedAt: new Date(attempt.startedAt),
+        completedAt: attempt.completedAt ? new Date(attempt.completedAt) : null,
+        result: cloneJson(attempt.result, {}),
+        error: toNullable(attempt.error),
+        metadata: cloneJson(attempt.metadata, {})
+      },
+      create: {
+        id: attempt.id,
+        jobId: attempt.jobId,
+        status: attempt.status,
+        method: attempt.method,
+        startedAt: new Date(attempt.startedAt),
+        completedAt: attempt.completedAt ? new Date(attempt.completedAt) : null,
+        result: cloneJson(attempt.result, {}),
+        error: toNullable(attempt.error),
+        metadata: cloneJson(attempt.metadata, {})
+      }
+    });
+    return mapPostingAttempt(record);
+  }
+
+  async listPostingAttempts({ jobId } = {}) {
+    const records = await this.client.postingAttempt.findMany({
+      where: jobId ? { jobId } : undefined,
+      orderBy: { startedAt: 'asc' }
+    });
+    return records.map(mapPostingAttempt);
+  }
+
   async saveLead(lead) {
     await this.client.$transaction(async (tx) => {
       await tx.lead.upsert({
@@ -963,6 +1194,8 @@ export class PrismaStore extends LotPilotStore {
       where,
       update: {
         userId: toNullable(recipient.userId),
+        label: toNullable(recipient.label),
+        rules: cloneJson(recipient.rules, {}),
         isActive: Boolean(recipient.isActive),
         updatedAt: new Date(recipient.updatedAt)
       },
@@ -972,12 +1205,18 @@ export class PrismaStore extends LotPilotStore {
         userId: toNullable(recipient.userId),
         channel: recipient.channel,
         destination: recipient.destination,
+        label: toNullable(recipient.label),
+        rules: cloneJson(recipient.rules, {}),
         isActive: Boolean(recipient.isActive),
         createdAt: new Date(recipient.createdAt),
         updatedAt: new Date(recipient.updatedAt)
       }
     });
     return mapNotificationRecipient(record);
+  }
+
+  async getNotificationRecipient(recipientId) {
+    return mapNotificationRecipient(await this.client.notificationRecipient.findUnique({ where: { id: recipientId } }));
   }
 
   async listNotificationRecipients({ rooftopId, isActive } = {}) {

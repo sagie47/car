@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "LotPilot Marketplace Autofill",
-  "version": "0.1.0",
-  "description": "Autofill reviewed LotPilot Marketplace listing copy into the active browser tab.",
+  "version": "0.2.0",
+  "description": "Autofill reviewed LotPilot vehicle listings into Facebook Marketplace vehicle-sale forms.",
   "permissions": ["activeTab", "clipboardWrite", "downloads", "scripting", "storage"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "http://*/*", "https://*/*"],
   "action": {
@@ -14,7 +14,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
+      "matches": [
+        "https://www.facebook.com/marketplace/*",
+        "https://web.facebook.com/marketplace/*",
+        "http://127.0.0.1/*",
+        "http://localhost/*"
+      ],
       "js": ["content-script.js"],
       "run_at": "document_idle"
     }

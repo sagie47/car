@@ -123,6 +123,38 @@ export class LotPilotStore {
     throw new Error('Not implemented');
   }
 
+  async savePostingAccount() {
+    throw new Error('Not implemented');
+  }
+
+  async getPostingAccount() {
+    throw new Error('Not implemented');
+  }
+
+  async listPostingAccounts() {
+    throw new Error('Not implemented');
+  }
+
+  async savePostingJob() {
+    throw new Error('Not implemented');
+  }
+
+  async getPostingJob() {
+    throw new Error('Not implemented');
+  }
+
+  async listPostingJobs() {
+    throw new Error('Not implemented');
+  }
+
+  async savePostingAttempt() {
+    throw new Error('Not implemented');
+  }
+
+  async listPostingAttempts() {
+    throw new Error('Not implemented');
+  }
+
   async saveLead() {
     throw new Error('Not implemented');
   }
@@ -136,6 +168,10 @@ export class LotPilotStore {
   }
 
   async saveNotificationRecipient() {
+    throw new Error('Not implemented');
+  }
+
+  async getNotificationRecipient() {
     throw new Error('Not implemented');
   }
 
