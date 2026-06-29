@@ -6,7 +6,9 @@ import { resolveDatabaseUrl } from '../src/lib/env.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const prismaCliPath = path.resolve(__dirname, '..', 'node_modules', 'prisma', 'build', 'index.js');
 
-const result = spawnSync(process.execPath, [prismaCliPath, 'db', 'push'], {
+// The integration suite always targets the disposable `test` schema, so schema
+// changes can be applied without blocking on stale local test data.
+const result = spawnSync(process.execPath, [prismaCliPath, 'db', 'push', '--accept-data-loss'], {
   stdio: 'inherit',
   env: {
     ...process.env,

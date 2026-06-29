@@ -4,6 +4,11 @@ export class InMemoryStore extends LotPilotStore {
   constructor() {
     super();
     this.dealers = new Map();
+    this.userProfiles = new Map();
+    this.userIdsByEmail = new Map();
+    this.memberships = new Map();
+    this.rooftopAccess = new Map();
+    this.invitations = new Map();
     this.rooftops = new Map();
     this.inventorySources = new Map();
     this.syncRuns = new Map();
@@ -11,7 +16,14 @@ export class InMemoryStore extends LotPilotStore {
     this.vehicleKeys = new Map();
     this.listings = new Map();
     this.vehicleListingIds = new Map();
+    this.postingAccounts = new Map();
+    this.postingJobs = new Map();
+    this.postingAttempts = new Map();
     this.leads = new Map();
+    this.notificationRecipients = new Map();
+    this.inboundEvents = new Map();
+    this.inboundEventsByExternalId = new Map();
+    this.notificationDeliveries = new Map();
   }
 
   async saveDealer(dealer) {
@@ -25,6 +37,62 @@ export class InMemoryStore extends LotPilotStore {
 
   async getDealer(dealerId) {
     return this.dealers.get(dealerId) ?? null;
+  }
+
+  async saveUserProfile(user) {
+    this.userProfiles.set(user.id, user);
+    this.userIdsByEmail.set(user.email.toLowerCase(), user.id);
+    return user;
+  }
+
+  async getUserProfile(userId) {
+    return this.userProfiles.get(userId) ?? null;
+  }
+
+  async getUserProfileByEmail(email) {
+    const userId = this.userIdsByEmail.get(email.toLowerCase());
+    return userId ? this.userProfiles.get(userId) ?? null : null;
+  }
+
+  async saveMembership(membership) {
+    this.memberships.set(`${membership.dealerId}:${membership.userId}`, membership);
+    return membership;
+  }
+
+  async getMembership({ dealerId, userId }) {
+    return this.memberships.get(`${dealerId}:${userId}`) ?? null;
+  }
+
+  async listMemberships({ dealerId, userId } = {}) {
+    return [...this.memberships.values()].filter((membership) =>
+      (!dealerId || membership.dealerId === dealerId) && (!userId || membership.userId === userId)
+    );
+  }
+
+  async saveRooftopAccess(access) {
+    this.rooftopAccess.set(`${access.rooftopId}:${access.userId}`, access);
+    return access;
+  }
+
+  async listRooftopAccess({ rooftopId, userId } = {}) {
+    return [...this.rooftopAccess.values()].filter((access) =>
+      (!rooftopId || access.rooftopId === rooftopId) && (!userId || access.userId === userId)
+    );
+  }
+
+  async saveInvitation(invitation) {
+    this.invitations.set(invitation.id, invitation);
+    return invitation;
+  }
+
+  async getInvitation(invitationId) {
+    return this.invitations.get(invitationId) ?? null;
+  }
+
+  async listInvitations({ email, status } = {}) {
+    return [...this.invitations.values()].filter((invitation) =>
+      (!email || invitation.email === email.toLowerCase()) && (!status || invitation.status === status)
+    );
   }
 
   async saveRooftop(rooftop) {
@@ -125,6 +193,55 @@ export class InMemoryStore extends LotPilotStore {
     return rooftopId ? listings.filter((listing) => listing.rooftopId === rooftopId) : listings;
   }
 
+  async savePostingAccount(account) {
+    this.postingAccounts.set(account.id, account);
+    return account;
+  }
+
+  async getPostingAccount(accountId) {
+    return this.postingAccounts.get(accountId) ?? null;
+  }
+
+  async listPostingAccounts({ rooftopId, status } = {}) {
+    return [...this.postingAccounts.values()].filter((account) =>
+      (!rooftopId || account.rooftopId === rooftopId) && (!status || account.status === status)
+    );
+  }
+
+  async savePostingJob(job) {
+    this.postingJobs.set(job.id, job);
+    return job;
+  }
+
+  async getPostingJob(jobId) {
+    return this.postingJobs.get(jobId) ?? null;
+  }
+
+  async listPostingJobs({ rooftopId, listingId, status, active } = {}) {
+    const activeStatuses = new Set(['pending', 'blocked', 'claimed', 'in_progress', 'needs_manual_review']);
+    return [...this.postingJobs.values()]
+      .filter((job) =>
+        (!rooftopId || job.rooftopId === rooftopId) &&
+        (!listingId || job.listingId === listingId) &&
+        (!status || job.status === status) &&
+        (active === undefined || activeStatuses.has(job.status) === active)
+      )
+      .sort((left, right) =>
+        left.scheduledFor.localeCompare(right.scheduledFor) || right.priority - left.priority
+      );
+  }
+
+  async savePostingAttempt(attempt) {
+    this.postingAttempts.set(attempt.id, attempt);
+    return attempt;
+  }
+
+  async listPostingAttempts({ jobId } = {}) {
+    return [...this.postingAttempts.values()]
+      .filter((attempt) => !jobId || attempt.jobId === jobId)
+      .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+  }
+
   async saveLead(lead) {
     this.leads.set(lead.id, lead);
     return lead;
@@ -147,5 +264,44 @@ export class InMemoryStore extends LotPilotStore {
 
       return true;
     });
+  }
+
+  async saveNotificationRecipient(recipient) {
+    this.notificationRecipients.set(recipient.id, recipient);
+    return recipient;
+  }
+
+  async getNotificationRecipient(recipientId) {
+    return this.notificationRecipients.get(recipientId) ?? null;
+  }
+
+  async listNotificationRecipients({ rooftopId, isActive } = {}) {
+    return [...this.notificationRecipients.values()].filter((recipient) => {
+      if (rooftopId && recipient.rooftopId !== rooftopId) return false;
+      if (isActive !== undefined && recipient.isActive !== isActive) return false;
+      return true;
+    });
+  }
+
+  async saveInboundEvent(event) {
+    this.inboundEvents.set(event.id, event);
+    this.inboundEventsByExternalId.set(event.externalId, event.id);
+    return event;
+  }
+
+  async getInboundEventByExternalId(externalId) {
+    const eventId = this.inboundEventsByExternalId.get(externalId);
+    return eventId ? this.inboundEvents.get(eventId) ?? null : null;
+  }
+
+  async saveNotificationDelivery(delivery) {
+    this.notificationDeliveries.set(delivery.id, delivery);
+    return delivery;
+  }
+
+  async listNotificationDeliveries({ leadId, status } = {}) {
+    return [...this.notificationDeliveries.values()].filter((delivery) =>
+      (!leadId || delivery.leadId === leadId) && (!status || delivery.status === status)
+    );
   }
 }

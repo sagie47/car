@@ -3,6 +3,35 @@ import { resolveDatabaseUrl } from '../../src/lib/env.js';
 import { PrismaStore } from '../../src/store/prisma-store.js';
 import { LotPilotService } from '../../src/service/lotpilot-service.js';
 
+const TEST_TABLES = [
+  'NotificationDelivery',
+  'InboundEvent',
+  'NotificationRecipient',
+  'LeadEvent',
+  'Lead',
+  'ListingEvent',
+  'Listing',
+  'VehicleSnapshot',
+  'InventorySyncRun',
+  'InventorySource',
+  'Vehicle',
+  'RooftopAccess',
+  'DealerInvitation',
+  'DealerMembership',
+  'Rooftop',
+  'Dealer',
+  'UserProfile'
+];
+
+function getDatabaseSchema(url) {
+  const parsedUrl = new URL(url);
+  return parsedUrl.searchParams.get('schema') || 'public';
+}
+
+function quoteIdentifier(value) {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
 export function createPrismaTestClient() {
   return createPrismaClient({
     url: resolveDatabaseUrl({ forTest: true })
@@ -10,18 +39,12 @@ export function createPrismaTestClient() {
 }
 
 export async function resetDatabase(client) {
+  const schema = getDatabaseSchema(resolveDatabaseUrl({ forTest: true }));
+  const tableNames = TEST_TABLES.map((table) => `${quoteIdentifier(schema)}.${quoteIdentifier(table)}`).join(',\n      ');
+
   await client.$executeRawUnsafe(`
     TRUNCATE TABLE
-      "LeadEvent",
-      "Lead",
-      "ListingEvent",
-      "Listing",
-      "VehicleSnapshot",
-      "InventorySyncRun",
-      "InventorySource",
-      "Vehicle",
-      "Rooftop",
-      "Dealer"
+      ${tableNames}
     CASCADE;
   `);
 }

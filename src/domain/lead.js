@@ -1,4 +1,4 @@
-import { createId, nowIso } from '../lib/utils.js';
+﻿import { createId, nowIso } from '../lib/utils.js';
 
 const VALID_LEAD_STATUSES = new Set([
   'new',
@@ -11,7 +11,7 @@ const VALID_LEAD_STATUSES = new Set([
   'lost'
 ]);
 
-function createLeadEvent(type, metadata = {}) {
+export function createLeadEvent(type, metadata = {}) {
   return {
     id: createId('lead_event'),
     type,
@@ -50,6 +50,11 @@ export function createLeadRecord(payload, vehicle) {
     sold: Boolean(payload.sold),
     attributedValue: payload.attributedValue ?? null,
     suggestedResponse: payload.suggestedResponse ?? buildSuggestedResponse(vehicle),
+    contactName: payload.contactName ?? null,
+    contactEmail: payload.contactEmail ?? null,
+    contactPhone: payload.contactPhone ?? null,
+    sourceMessage: payload.sourceMessage ?? null,
+    externalId: payload.externalId ?? null,
     events: [createLeadEvent('created')]
   };
 }
@@ -75,5 +80,12 @@ export function updateLeadStatusRecord(lead, status, metadata = {}) {
     firstResponseAt:
       status === 'responded' && !lead.firstResponseAt ? nowIso() : lead.firstResponseAt,
     events: [...lead.events, createLeadEvent('status_changed', { actor: metadata.actor ?? 'system', status })]
+  };
+}
+
+export function appendLeadEvent(lead, type, metadata = {}) {
+  return {
+    ...lead,
+    events: [...lead.events, createLeadEvent(type, metadata)]
   };
 }

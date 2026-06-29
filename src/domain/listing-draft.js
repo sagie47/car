@@ -139,6 +139,35 @@ function buildPhotoOrderRecommendation(vehicle) {
   }));
 }
 
+function applyOverrides(draft, overrides = {}) {
+  const marketplacePost = {
+    ...draft.marketplacePost,
+    title: overrides.title ?? draft.marketplacePost.title,
+    price: overrides.price ?? draft.marketplacePost.price,
+    description: overrides.description ?? draft.marketplacePost.description,
+    photoUrls: overrides.photoUrls ?? draft.marketplacePost.photoUrls
+  };
+
+  marketplacePost.copyBlocks = {
+    title: marketplacePost.title,
+    price: marketplacePost.price === null ? '' : String(marketplacePost.price),
+    description: marketplacePost.description
+  };
+
+  return {
+    ...draft,
+    marketplacePost,
+    overrides: {
+      title: overrides.title ?? null,
+      price: overrides.price ?? null,
+      description: overrides.description ?? null,
+      photoUrls: overrides.photoUrls ?? null,
+      updatedAt: overrides.updatedAt ?? null,
+      updatedBy: overrides.updatedBy ?? null
+    }
+  };
+}
+
 export function buildListingDraft(vehicle, options = {}) {
   const tonePreset = options.tonePreset ?? 'straightforward';
   const stale = isVehicleStale(vehicle, options.rules);
@@ -148,7 +177,7 @@ export function buildListingDraft(vehicle, options = {}) {
     rooftop: options.rooftop ?? null
   });
 
-  return {
+  const draft = {
     title: titleFromVehicle(vehicle),
     shortDescription: shortDescriptionForTone(vehicle, tonePreset),
     longDescription: longDescriptionForVehicle(vehicle, tonePreset),
@@ -189,4 +218,18 @@ export function buildListingDraft(vehicle, options = {}) {
       autoApproved: false
     }
   };
+
+  return applyOverrides(draft, options.overrides);
+}
+
+export function updateListingDraftOverrides(draft, updates, { actor, updatedAt = nowIso() } = {}) {
+  const existing = draft.overrides ?? {};
+  const overrides = {
+    ...existing,
+    ...updates,
+    updatedAt,
+    updatedBy: actor ?? existing.updatedBy ?? 'system'
+  };
+
+  return applyOverrides({ ...draft, marketplacePost: { ...draft.marketplacePost } }, overrides);
 }

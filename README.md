@@ -30,12 +30,13 @@ product wedge:
 
 - Dealer and rooftop creation.
 - Inventory ingest with durable vehicle upsert by rooftop plus VIN.
-- Inventory source persistence and manual XML feed URL sync.
+- Inventory source persistence and manual XML, CSV, and public inventory URL sync.
 - Separate Next.js dealer app for setup, health, vehicles, listings, leads,
   reports, settings, stale-unit review, and assignment management.
 - Eligibility evaluation and rooftop health scoring.
-- Listing draft generation and listing-state transitions.
-- Basic lead creation, assignment, and status tracking.
+- Listing draft generation, Marketplace review/copy, browser autofill helper,
+  and listing-state transitions.
+- Basic lead creation, assignment, alert delivery, reply templates, and status tracking.
 - JSON API for local development.
 - Postgres persistence for dealers, rooftops, sync runs, vehicles, snapshots,
   listings, listing events, leads, and lead events.
@@ -78,6 +79,9 @@ named `lotpilot` and use the same connection URLs from `.env.example`.
 - `GET /api/rooftops?dealerId=...`
 - `GET /api/rooftops/:rooftopId`
 - `GET /api/rooftops/:rooftopId/dashboard`
+- `GET /api/rooftops/:rooftopId/notification-recipients`
+- `POST /api/rooftops/:rooftopId/notification-recipients`
+- `PATCH /api/notification-recipients/:recipientId`
 - `POST /api/inventory-sources`
 - `GET /api/inventory-sources?rooftopId=...`
 - `GET /api/inventory-sources/:inventorySourceId`
@@ -94,6 +98,10 @@ named `lotpilot` and use the same connection URLs from `.env.example`.
 - `GET /api/leads/:leadId`
 - `PATCH /api/leads/:leadId/assign`
 - `PATCH /api/leads/:leadId/status`
+- `GET /api/leads/:leadId/notification-deliveries`
+- `POST /api/leads/:leadId/notifications/retry`
+- `POST /api/leads/:leadId/events`
+- `POST /api/webhooks/resend/inbound`
 
 ## Dealer app surfaces
 
@@ -106,6 +114,25 @@ named `lotpilot` and use the same connection URLs from `.env.example`.
 - `/reports`
 - `/settings`
 - `/assignments`
+
+Lead alert recipients, inbound lead alias guidance, and manual lead capture are
+available from `/settings` and `/leads`. Lead detail pages show alert delivery
+history, retry failed alerts, and copyable response templates.
+
+## Chrome autofill extension
+
+The local extension in [apps/chrome-extension](apps/chrome-extension) can fetch
+a reviewed listing and autofill common Marketplace-style title, price, and
+description fields on the active tab.
+
+Load it from `chrome://extensions` with Developer mode enabled and select
+`apps/chrome-extension` as an unpacked extension. In local auth-disabled dev,
+use `http://127.0.0.1:3000` as the API base URL and paste a `listing_...` ID
+from the dealer app. If auth is enabled, paste a short-lived bearer token or
+the configured `LOT_PILOT_SERVER_API_TOKEN`.
+
+Photo upload remains manual because Chrome extensions cannot set file input
+values from remote image URLs. The extension can copy the ordered photo URLs.
 
 ## Persistence notes
 

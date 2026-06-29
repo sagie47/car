@@ -1,4 +1,5 @@
 import { ListingTransitionForm } from '../../../components/actions';
+import { ListingReview } from '../../../components/listing-review';
 import { Badge, Card, DataTable, EmptyState, PageHeader } from '../../../components/cards';
 import { getListing, getVehicle } from '../../../lib/api';
 import { formatDateTime, vehicleLabel } from '../../../lib/format';
@@ -13,13 +14,13 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
     return <EmptyState title="Listing not found" body="The requested listing could not be loaded." />;
   }
 
-  const vehicle = await getVehicle(listing.vehicleId);
+  const vehicle = await getVehicle(listing.vehicleId).catch(() => null);
 
   return (
     <div className="stack page-stack">
       <PageHeader
-        title={listing.draft.title || vehicleLabel(vehicle)}
-        subtitle={`Listing ${listing.id} • vehicle ${vehicle.stockNumber || vehicle.vin}`}
+        title={listing.draft.title || (vehicle ? vehicleLabel(vehicle) : listing.vehicleId)}
+        subtitle={`Listing ${listing.id} • vehicle ${vehicle?.stockNumber || vehicle?.vin || listing.vehicleId}`}
       />
 
       <div className="content-grid">
@@ -58,29 +59,7 @@ export default async function ListingDetailPage({ params }: { params: Promise<{ 
 
       {listing.draft.marketplacePost ? (
         <Card title="Facebook Marketplace post" subtitle="Copy-and-approve output for the assisted posting workflow." accent="blue">
-          <div className="stack">
-            <DataTable
-              columns={['Field', 'Copy-ready value']}
-              rows={[
-                ['Title', listing.draft.marketplacePost.copyBlocks.title],
-                ['Price', listing.draft.marketplacePost.copyBlocks.price || 'No price'],
-                ['Channel', listing.draft.marketplacePost.channel.replace(/_/g, ' ')],
-                ['Workflow', listing.draft.marketplacePost.workflow.replace(/_/g, ' ')]
-              ]}
-            />
-            <div>
-              <p><strong>Description</strong></p>
-              <pre className="mono-copy">{listing.draft.marketplacePost.copyBlocks.description}</pre>
-            </div>
-            <div>
-              <p><strong>Posting checklist</strong></p>
-              <ul className="check-list">
-                {listing.draft.marketplacePost.checklist.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
+          <ListingReview listing={listing} />
         </Card>
       ) : null}
 

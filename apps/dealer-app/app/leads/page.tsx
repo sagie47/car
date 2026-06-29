@@ -1,8 +1,8 @@
 import Link from 'next/link';
-import { LeadAssignmentForm, LeadStatusForm } from '../../components/actions';
+import { LeadAssignmentForm, LeadStatusForm, ManualLeadForm } from '../../components/actions';
 import { DataTable, EmptyState, PageHeader, StatGrid } from '../../components/cards';
 import { getAppContext } from '../../lib/app-context';
-import { listLeads } from '../../lib/api';
+import { listLeads, listVehicles } from '../../lib/api';
 import { formatDateTime, formatNumber } from '../../lib/format';
 
 export default async function LeadsPage() {
@@ -13,6 +13,7 @@ export default async function LeadsPage() {
   }
 
   const leads = await listLeads({ rooftopId: context.activeRooftop.id });
+  const vehicles = await listVehicles(context.activeRooftop.id);
 
   return (
     <div className="stack page-stack">
@@ -24,6 +25,16 @@ export default async function LeadsPage() {
           { label: 'Responded', value: formatNumber(leads.filter((lead) => lead.status === 'responded').length), tone: 'green' },
           { label: 'Appointments', value: formatNumber(leads.filter((lead) => lead.status === 'appointment_set').length), tone: 'slate' }
         ]}
+      />
+      <ManualLeadForm
+        rooftopId={context.activeRooftop.id}
+        vehicles={vehicles.map((vehicle) => ({
+          id: vehicle.id,
+          year: vehicle.year,
+          make: vehicle.make,
+          model: vehicle.model,
+          stockNumber: vehicle.stockNumber
+        }))}
       />
       <DataTable
         columns={['Lead', 'Created', 'Assigned rep', 'Assign', 'Status', 'Update', 'Actions']}
